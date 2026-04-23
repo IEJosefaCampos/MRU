@@ -63,7 +63,7 @@ const CHARACTERS: Character[] = [
   { 
     id: 'vector', 
     name: 'VECTOR "EL VELOZ"', 
-    image: '/vector2.png', 
+    image: 'https://i.postimg.cc/cHsJqfy5/Vector2.png', 
     color: '#e60012',
     personality: 'Directo y enfocado.',
     motto: '"La distancia más corta entre dos puntos es mi trayectoria"'
@@ -71,21 +71,21 @@ const CHARACTERS: Character[] = [
   { 
     id: 'inercia', 
     name: 'INERCIA "LA IMPARABLE"', 
-    image: '/inercia2.png', 
+    image: 'https://i.postimg.cc/zBJfmTZ7/inercia2.png', 
     color: '#43b02a',
     personality: 'Una vez que arranca, nadie la detiene. Es relajada pero persistente.'
   },
   { 
     id: 'cronos', 
     name: 'CRONOS "EL PRECISO"', 
-    image: '/cronos2.png', 
+    image: 'https://i.postimg.cc/Dz3ZgtCm/cronos2.png', 
     color: '#0072ce',
     personality: 'Obsesionado con la exactitud. Calcula cada milisegundo de la carrera.'
   },
   { 
     id: 'magno', 
     name: 'MAGNO "EL MASA"', 
-    image: '/magno2.png', 
+    image: 'https://i.postimg.cc/50xtc8dR/magno2.png', 
     color: '#f9d71c',
     personality: 'Rudo pero bonachón. Su fuerza le permite mantener una velocidad constante sin desviarse por obstáculos menores.'
   },
@@ -703,7 +703,7 @@ export default function App() {
               <div 
                 className="relative h-[280px] sm:h-[400px] md:h-[450px] rounded-2xl sm:rounded-3xl border-4 sm:border-8 border-black overflow-hidden shadow-2xl flex flex-col group"
                 style={{ 
-                  backgroundImage: 'url(/background2.png)',
+                  backgroundImage: 'url(https://i.postimg.cc/SKLKtD5d/background2.png)',
                   backgroundSize: 'auto 100%',
                   backgroundRepeat: 'repeat'
                 }}
@@ -734,7 +734,7 @@ export default function App() {
                       <div 
                         className="h-full shrink-0 relative" 
                         style={{ 
-                          backgroundImage: 'url(/background2.png)',
+                          backgroundImage: 'url(https://i.postimg.cc/SKLKtD5d/background2.png)',
                           backgroundSize: 'auto 100%',
                           backgroundRepeat: 'repeat-x',
                           width: '1600px'
@@ -745,7 +745,7 @@ export default function App() {
                       <div 
                         className="h-full shrink-0 relative" 
                         style={{ 
-                          backgroundImage: 'url(/background1.png)',
+                          backgroundImage: 'url(https://i.postimg.cc/7L1LQmcn/background1.png)',
                           backgroundSize: '1200px 100%',
                           backgroundRepeat: 'no-repeat',
                           width: '1200px'
@@ -755,7 +755,7 @@ export default function App() {
                         <div 
                           className="absolute inset-0 z-50 pointer-events-none"
                           style={{
-                            backgroundImage: 'url(/foreground1.png)',
+                            backgroundImage: 'url(https://i.postimg.cc/nLKLw05D/foreground1.png)',
                             backgroundSize: '1200px 100%',
                             backgroundRepeat: 'no-repeat'
                           }}
@@ -767,7 +767,7 @@ export default function App() {
                       <div 
                         className="h-full shrink-0 relative" 
                         style={{ 
-                          backgroundImage: 'url(/background2.png)',
+                          backgroundImage: 'url(https://i.postimg.cc/SKLKtD5d/background2.png)',
                           backgroundRepeat: 'repeat-x',
                           backgroundSize: 'auto 100%',
                           width: `${Math.max(0, dEndPixels - (1200 - 130) - 560)}px`
@@ -778,7 +778,7 @@ export default function App() {
                       <div 
                         className="h-full shrink-0 relative" 
                         style={{ 
-                          backgroundImage: 'url(/background3.png)',
+                          backgroundImage: 'url(https://i.postimg.cc/9fPfNJSS/background3.png)',
                           backgroundSize: '1200px 100%',
                           backgroundRepeat: 'no-repeat',
                           width: '1200px',
@@ -792,7 +792,7 @@ export default function App() {
                         <div 
                           className="absolute inset-0 z-50 pointer-events-none"
                           style={{
-                            backgroundImage: 'url(/foreground3.png)',
+                            backgroundImage: 'url(https://i.postimg.cc/tgdgm2fD/foreground2.png)',
                             backgroundSize: '1200px 100%',
                             backgroundRepeat: 'no-repeat'
                           }}
@@ -803,7 +803,7 @@ export default function App() {
                       <div 
                         className="h-full shrink-0 relative" 
                         style={{ 
-                          backgroundImage: 'url(/background2.png)',
+                          backgroundImage: 'url(https://i.postimg.cc/SKLKtD5d/background2.png)',
                           backgroundSize: 'auto 100%',
                           backgroundRepeat: 'repeat-x',
                           width: '1800px'
