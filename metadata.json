@@ -1,0 +1,5 @@
+{
+  "name": "Simulador de Movimiento Rectilíneo Uniforme (MRU)",
+  "description": "Una herramienta interactiva para estudiar el MRU, permitiendo calcular distancia, tiempo y velocidad, con gráficos dinámicos de v vs t y d vs t.",
+  "requestFramePermissions": []
+}
