@@ -43,7 +43,7 @@ import {
   XCircle,
   ArrowRight
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
 import { cn } from './lib/utils';
 
