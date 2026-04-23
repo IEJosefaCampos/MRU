@@ -12,8 +12,12 @@ export const signInWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
-  } catch (error) {
-    console.error("Error signing in with Google", error);
+  } catch (error: any) {
+    console.error("Error signing in with Google:", error.code, error.message);
+    // If the error is about an unauthorized domain, show a specific alert
+    if (error.code === 'auth/unauthorized-domain') {
+      alert("Error: El dominio actual no está autorizado en Firebase. Por favor, agregue este dominio a la lista de dominios autorizados en la consola de Firebase.");
+    }
     return null;
   }
 };
