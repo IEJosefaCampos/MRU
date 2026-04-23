@@ -162,8 +162,24 @@ export default function App() {
   useEffect(() => {
     if (gameState === 'admin' && currentUser?.email === 'iejosefacampos2025@gmail.com') {
       const q = query(collection(db, 'sessions'), orderBy('lastActiveAt', 'desc'));
-      return onSnapshot(q, (snapshot) => {
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      return onSnapshot(q, async (snapshot) => {
+        const sessionsPromises = snapshot.docs.map(async (d) => {
+          const sessionData = { id: d.id, ...d.data() } as any;
+          
+          // Get responses for this session
+          const responsesQuery = query(collection(db, 'sessions', d.id, 'responses'), orderBy('timestamp', 'asc'));
+          const responsesSnapshot = await new Promise<any>((resolve) => {
+            const unsub = onSnapshot(responsesQuery, (innerSnap) => {
+              unsub();
+              resolve(innerSnap.docs.map(doc => doc.data()));
+            });
+          });
+          
+          sessionData.responses = responsesSnapshot;
+          return sessionData;
+        });
+
+        const data = await Promise.all(sessionsPromises);
         setAdminData(data);
       });
     }
@@ -187,7 +203,7 @@ export default function App() {
     }
   };
 
-  const updateSession = async (newCoins: number, correct: boolean) => {
+  const updateSession = async (newCoins: number, correct: boolean, studentAnswer: string) => {
     if (!sessionId) return;
     try {
       const sessionRef = doc(db, 'sessions', sessionId);
@@ -201,7 +217,7 @@ export default function App() {
       // Save response
       await addDoc(collection(db, 'sessions', sessionId, 'responses'), {
         challengeId: CHALLENGES[currentChallengeIdx].id,
-        answer: feedback?.message || '', // This is a bit hacky, normally we'd pass the actual answer
+        answer: studentAnswer,
         isCorrect: correct,
         timestamp: serverTimestamp()
       });
@@ -525,11 +541,11 @@ export default function App() {
       setCoins(newCoins);
       setFeedback({ correct: true, message: "¡EXCELENTE! Has salvado un sector de la galaxia." });
       playSound('success');
-      updateSession(newCoins, true);
+      updateSession(newCoins, true, answer);
     } else {
       setFeedback({ correct: false, message: "¡OH NO! El cálculo falló. ¡Inténtalo de nuevo!" });
       playSound('fail');
-      updateSession(coins, false);
+      updateSession(coins, false, answer);
     }
   };
 
@@ -1276,55 +1292,126 @@ export default function App() {
           >
             <div className="flex items-center justify-between bg-white p-8 rounded-2xl border-4 border-black shadow-[8px_8px_0px_#000]">
               <div>
-                <h2 className="text-4xl font-display font-black italic uppercase text-kart-blue">Caja de Herramientas del Docente</h2>
-                <p className="font-tech text-slate-500 uppercase tracking-widest text-xs mt-2">Monitoreo de resultados en tiempo real</p>
+                <h2 className="text-4xl font-display font-black italic uppercase text-kart-blue">Monitoreo de resultados en tiempo real</h2>
+                <p className="font-tech text-slate-500 uppercase tracking-widest text-xs mt-2">Control central de misiones galácticas</p>
               </div>
-              <button 
-                onClick={() => setGameState('intro')}
-                className="kart-button bg-slate-100 text-black px-6 py-2 text-sm"
-              >
-                SALIR
-              </button>
+              <div className="flex items-center gap-4">
+                <div className="text-right hidden md:block">
+                  <p className="font-tech text-[10px] text-slate-400 uppercase font-bold tracking-widest">Sesiones Totales</p>
+                  <p className="font-display font-black italic text-2xl text-kart-red leading-none">{adminData.length}</p>
+                </div>
+                <button 
+                  onClick={() => setGameState('intro')}
+                  className="kart-button bg-slate-100 text-black px-6 py-2 text-sm"
+                >
+                  VOLVER
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {adminData.map((session: any) => (
-                <div key={session.id} className="kart-card p-6 bg-white border-4 border-black relative overflow-hidden group">
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <p className="font-display font-bold text-xl uppercase text-kart-red leading-none mb-1">{session.userName}</p>
-                      <p className="font-tech text-[10px] text-slate-400 uppercase tracking-widest">{session.userGrade}</p>
-                    </div>
-                    <div className="bg-kart-yellow px-2 py-1 border-2 border-black rounded text-[10px] font-tech font-bold uppercase">
-                      {session.coins} pts
+            <div className="grid grid-cols-1 gap-8">
+              {adminData.map((session: any) => {
+                const totalAnswers = session.responses?.length || 0;
+                const correctCount = session.responses?.filter((r: any) => r.isCorrect).length || 0;
+                const incorrectCount = totalAnswers - correctCount;
+                const successRate = totalAnswers > 0 ? (correctCount / totalAnswers) * 100 : 0;
+                const failRate = totalAnswers > 0 ? (incorrectCount / totalAnswers) * 100 : 0;
+                
+                // Valuation logic (Bajo, Básico, Alto, Superior)
+                const getValuation = (score: number) => {
+                  if (score >= 90) return { label: 'SUPERIOR', color: 'bg-kart-green' };
+                  if (score >= 75) return { label: 'ALTO', color: 'bg-kart-blue' };
+                  if (score >= 60) return { label: 'BÁSICO', color: 'bg-kart-yellow text-slate-900 border-2 border-black' };
+                  return { label: 'BAJO', color: 'bg-kart-red' };
+                };
+                const valuation = getValuation(session.totalScore || 0);
+
+                return (
+                  <div key={session.id} className="kart-card p-6 bg-white border-4 border-black relative overflow-hidden group">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                      {/* Left: User Info & Summary */}
+                      <div className="lg:col-span-4 space-y-6">
+                        <div className="flex items-start gap-4">
+                          <div className="bg-slate-100 p-4 rounded-xl border-2 border-black">
+                            <User className="text-slate-400" size={32} />
+                          </div>
+                          <div>
+                            <p className="font-display font-black italic text-2xl uppercase text-kart-red leading-none mb-2">{session.userName}</p>
+                            <div className="flex items-center gap-2">
+                              <GraduationCap size={16} className="text-slate-400" />
+                              <p className="font-tech text-xs text-slate-500 uppercase font-bold tracking-widest">{session.userGrade}</p>
+                            </div>
+                            <div className="mt-3 flex items-center gap-4">
+                              <div className={cn("px-3 py-1 rounded font-display font-black italic text-xs text-white shadow-[2px_2px_0px_#000]", valuation.color)}>
+                                {valuation.label}
+                              </div>
+                              <div className="font-display font-black italic text-lg text-kart-blue">
+                                {session.totalScore}%
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-kart-green/10 p-3 rounded-lg border-2 border-kart-green/20 text-center">
+                            <p className="font-tech text-[10px] uppercase text-kart-green font-bold mb-1">Aciertos</p>
+                            <p className="font-display font-black italic text-xl text-kart-green">{successRate.toFixed(0)}%</p>
+                          </div>
+                          <div className="bg-kart-red/10 p-3 rounded-lg border-2 border-kart-red/20 text-center">
+                            <p className="font-tech text-[10px] uppercase text-kart-red font-bold mb-1">Desaciertos</p>
+                            <p className="font-display font-black italic text-xl text-kart-red">{failRate.toFixed(0)}%</p>
+                          </div>
+                        </div>
+                        
+                        <div className="bg-slate-50 p-4 rounded-xl border-2 border-black border-dashed">
+                          <p className="font-tech text-[10px] uppercase text-slate-400 font-bold mb-2 tracking-widest">Actividad Reciente</p>
+                          <div className="flex items-center gap-2 text-xs font-bold font-tech text-slate-600">
+                            <Clock size={14} />
+                            {session.lastActiveAt?.toDate().toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: Detailed Mission Responses */}
+                      <div className="lg:col-span-8 flex flex-col">
+                        <p className="font-display font-black italic text-lg uppercase text-slate-900 mb-4 border-b-2 border-slate-100 pb-2">Historial de Misiones</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                          {session.responses?.length > 0 ? session.responses.map((resp: any, idx: number) => {
+                            const challenge = CHALLENGES.find(c => c.id === resp.challengeId);
+                            return (
+                              <div key={idx} className={cn(
+                                "p-4 rounded-xl border-2 border-black flex items-start gap-4 transition-all hover:scale-[1.02]",
+                                resp.isCorrect ? "bg-kart-green/5 border-kart-green" : "bg-kart-red/5 border-kart-red"
+                              )}>
+                                <div className={cn(
+                                  "shrink-0 w-8 h-8 rounded-lg border-2 border-black flex items-center justify-center font-display font-black text-white italic shadow-[2px_2px_0px_#000]",
+                                  resp.isCorrect ? "bg-kart-green" : "bg-kart-red"
+                                )}>
+                                  {resp.isCorrect ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="font-tech text-[10px] uppercase text-slate-400 font-bold leading-none">Misión #{resp.challengeId}</p>
+                                  <p className="font-tech text-xs text-slate-700 leading-tight line-clamp-2 italic">{challenge?.question}</p>
+                                  <div className="flex items-center gap-2 pt-1">
+                                    <span className="font-tech text-[10px] uppercase text-slate-500 font-bold">Respuesta:</span>
+                                    <span className={cn("font-display font-black italic text-sm", resp.isCorrect ? "text-kart-green" : "text-kart-red")}>
+                                      {resp.answer}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }) : (
+                            <div className="col-span-full py-10 text-center text-slate-300 font-tech uppercase italic">
+                              Aún no ha respondido misiones
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  
-                  <div className="space-y-4">
-                    <div className="flex justify-between text-xs font-bold font-tech uppercase">
-                      <span>Progreso</span>
-                      <span>{session.challengesCompleted} / {CHALLENGES.length}</span>
-                    </div>
-                    <div className="w-full h-3 bg-slate-100 border-2 border-black rounded-full overflow-hidden">
-                      <div 
-                        className={cn(
-                          "h-full transition-all duration-1000",
-                          session.totalScore >= 70 ? "bg-kart-green" : session.totalScore >= 40 ? "bg-kart-yellow" : "bg-kart-red"
-                        )}
-                        style={{ width: `${(session.challengesCompleted / CHALLENGES.length) * 100}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between items-center pt-4 border-t-2 border-slate-50">
-                      <div className="font-tech text-[10px] text-slate-400 uppercase">
-                        Último cambio: {session.lastActiveAt?.toDate().toLocaleTimeString()}
-                      </div>
-                      <div className="text-xs font-display font-black italic uppercase text-kart-blue">
-                        SCORE: {session.totalScore}%
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
               {adminData.length === 0 && (
                 <div className="col-span-full py-20 text-center kart-card bg-slate-50 border-4 border-dashed border-slate-300">
                   <Activity className="mx-auto text-slate-300 mb-4" size={64} />
