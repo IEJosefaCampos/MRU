@@ -1332,8 +1332,15 @@ export default function App() {
                       {/* Left: User Info & Summary */}
                       <div className="lg:col-span-4 space-y-6">
                         <div className="flex items-start gap-4">
-                          <div className="bg-slate-100 p-4 rounded-xl border-2 border-black">
-                            <User className="text-slate-400" size={32} />
+                          <div className="bg-slate-100 w-20 h-20 rounded-xl border-2 border-black overflow-hidden flex items-center justify-center p-1">
+                            {(() => {
+                              const char = CHARACTERS.find(c => c.id === session.selectedCharId);
+                              return char ? (
+                                <img src={char.image} alt={char.name} className="w-full h-full object-contain" />
+                              ) : (
+                                <User className="text-slate-400" size={32} />
+                              );
+                            })()}
                           </div>
                           <div>
                             <p className="font-display font-black italic text-2xl uppercase text-kart-red leading-none mb-2">{session.userName}</p>
