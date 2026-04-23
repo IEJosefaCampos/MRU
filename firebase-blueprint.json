@@ -1,0 +1,42 @@
+{
+  "entities": {
+    "sessions": {
+      "title": "User Session",
+      "description": "Information about a student's session and performance.",
+      "type": "object",
+      "properties": {
+        "userName": { "type": "string", "description": "Student nickname" },
+        "userGrade": { "type": "string", "description": "Student grade/class" },
+        "selectedCharId": { "type": "string", "description": "ID of the selected character" },
+        "coins": { "type": "integer", "description": "Total coins earned" },
+        "totalScore": { "type": "integer", "description": "Final score percentage" },
+        "challengesCompleted": { "type": "integer", "description": "Number of challenges completed" },
+        "startedAt": { "type": "string", "format": "date-time", "description": "When the session started" },
+        "lastActiveAt": { "type": "string", "format": "date-time", "description": "Last activity timestamp" }
+      },
+      "required": ["userName", "userGrade", "startedAt"]
+    },
+    "responses": {
+      "title": "Challenge Response",
+      "description": "Specific answers given by a student to a challenge.",
+      "type": "object",
+      "properties": {
+        "challengeId": { "type": "integer", "description": "ID of the challenge" },
+        "answer": { "type": "string", "description": "The answer provided by the user" },
+        "isCorrect": { "type": "boolean", "description": "Whether the answer was correct" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the answer was submitted" }
+      },
+      "required": ["challengeId", "answer", "isCorrect", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/sessions/{sessionId}": {
+      "schema": "sessions",
+      "description": "Root collection for student sessions."
+    },
+    "/sessions/{sessionId}/responses/{responseId}": {
+      "schema": "responses",
+      "description": "Subcollection for tracking individual answers within a session."
+    }
+  }
+}

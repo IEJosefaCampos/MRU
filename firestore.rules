@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function isSignedIn() { return request.auth != null; }
+    
+    // Admin check: Only the project owner/specified user email
+    // For this educational app, we'll allow public creation but restricted reading for the admin panel
+    function isAdmin() { 
+      return isSignedIn() && (request.auth.token.email == 'iejosefacampos2025@gmail.com' && request.auth.token.email_verified == true);
+    }
+
+    // Sessions collection
+    match /sessions/{sessionId} {
+      allow create: if true; // Allow anonymous session creation for students
+      allow update: if true; // Allow students to update their own coins/score
+      allow read: if isAdmin(); // Only Admin can see all sessions
+      
+      // Responses subcollection
+      match /responses/{responseId} {
+        allow create: if true; 
+        allow read: if isAdmin();
+      }
+    }
+  }
+}

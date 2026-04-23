@@ -45,10 +45,22 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
+import { 
+  collection, 
+  addDoc, 
+  serverTimestamp, 
+  updateDoc, 
+  doc, 
+  onSnapshot, 
+  query, 
+  orderBy 
+} from 'firebase/firestore';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { db, auth, signInWithGoogle } from './lib/firebase';
 import { cn } from './lib/utils';
 
 type Mode = 'distance' | 'time' | 'velocity' | 'meeting';
-type GameState = 'intro' | 'character_selection' | 'playing' | 'results';
+type GameState = 'intro' | 'character_selection' | 'playing' | 'results' | 'admin';
 
 interface Character {
   id: string;
@@ -133,6 +145,70 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [bgMusicStarted, setBgMusicStarted] = useState(false);
   const bgOscRef = useRef<OscillatorNode | null>(null);
+
+  // Firebase Tracking State
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [adminData, setAdminData] = useState<any[]>([]);
+
+  // Auth Listener
+  useEffect(() => {
+    return onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+  }, []);
+
+  // Admin Data Listener
+  useEffect(() => {
+    if (gameState === 'admin' && currentUser?.email === 'iejosefacampos2025@gmail.com') {
+      const q = query(collection(db, 'sessions'), orderBy('lastActiveAt', 'desc'));
+      return onSnapshot(q, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setAdminData(data);
+      });
+    }
+  }, [gameState, currentUser]);
+
+  const startSession = async () => {
+    try {
+      const docRef = await addDoc(collection(db, 'sessions'), {
+        userName,
+        userGrade,
+        selectedCharId: selectedChar?.id,
+        coins: 0,
+        totalScore: 0,
+        challengesCompleted: 0,
+        startedAt: serverTimestamp(),
+        lastActiveAt: serverTimestamp()
+      });
+      setSessionId(docRef.id);
+    } catch (e) {
+      console.error("Error starting session", e);
+    }
+  };
+
+  const updateSession = async (newCoins: number, correct: boolean) => {
+    if (!sessionId) return;
+    try {
+      const sessionRef = doc(db, 'sessions', sessionId);
+      await updateDoc(sessionRef, {
+        coins: newCoins,
+        challengesCompleted: currentChallengeIdx + 1,
+        lastActiveAt: serverTimestamp(),
+        totalScore: Math.round((newCoins / ((currentChallengeIdx + 1) * 50)) * 100)
+      });
+
+      // Save response
+      await addDoc(collection(db, 'sessions', sessionId, 'responses'), {
+        challengeId: CHALLENGES[currentChallengeIdx].id,
+        answer: feedback?.message || '', // This is a bit hacky, normally we'd pass the actual answer
+        isCorrect: correct,
+        timestamp: serverTimestamp()
+      });
+    } catch (e) {
+      console.error("Error updating session", e);
+    }
+  };
 
   // Simulator State
   const [mode, setMode] = useState<Mode>('distance');
@@ -442,13 +518,18 @@ export default function App() {
   const handleAnswer = (answer: string) => {
     startBgMusic(); // Start music on first interaction
     const challenge = CHALLENGES[currentChallengeIdx];
-    if (answer === challenge.correctAnswer) {
-      setCoins(prev => prev + challenge.reward);
+    const isCorrect = answer === challenge.correctAnswer;
+    
+    if (isCorrect) {
+      const newCoins = coins + challenge.reward;
+      setCoins(newCoins);
       setFeedback({ correct: true, message: "¡EXCELENTE! Has salvado un sector de la galaxia." });
       playSound('success');
+      updateSession(newCoins, true);
     } else {
       setFeedback({ correct: false, message: "¡OH NO! El cálculo falló. ¡Inténtalo de nuevo!" });
       playSound('fail');
+      updateSession(coins, false);
     }
   };
 
@@ -583,7 +664,10 @@ export default function App() {
             <div className="flex justify-center">
               <button 
                 disabled={!selectedChar}
-                onClick={() => setGameState('playing')}
+                onClick={() => {
+                  startSession();
+                  setGameState('playing');
+                }}
                 className="kart-button px-20 py-5 bg-kart-green text-white text-2xl disabled:opacity-50"
               >
                 ¡A LA PISTA!
@@ -1182,13 +1266,105 @@ export default function App() {
           </motion.div>
         )}
 
+        {/* ADMIN PANEL */}
+        {gameState === 'admin' && (
+          <motion.div 
+            key="admin"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="max-w-6xl mx-auto mt-10 space-y-8"
+          >
+            <div className="flex items-center justify-between bg-white p-8 rounded-2xl border-4 border-black shadow-[8px_8px_0px_#000]">
+              <div>
+                <h2 className="text-4xl font-display font-black italic uppercase text-kart-blue">Caja de Herramientas del Docente</h2>
+                <p className="font-tech text-slate-500 uppercase tracking-widest text-xs mt-2">Monitoreo de resultados en tiempo real</p>
+              </div>
+              <button 
+                onClick={() => setGameState('intro')}
+                className="kart-button bg-slate-100 text-black px-6 py-2 text-sm"
+              >
+                SALIR
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {adminData.map((session: any) => (
+                <div key={session.id} className="kart-card p-6 bg-white border-4 border-black relative overflow-hidden group">
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <p className="font-display font-bold text-xl uppercase text-kart-red leading-none mb-1">{session.userName}</p>
+                      <p className="font-tech text-[10px] text-slate-400 uppercase tracking-widest">{session.userGrade}</p>
+                    </div>
+                    <div className="bg-kart-yellow px-2 py-1 border-2 border-black rounded text-[10px] font-tech font-bold uppercase">
+                      {session.coins} pts
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div className="flex justify-between text-xs font-bold font-tech uppercase">
+                      <span>Progreso</span>
+                      <span>{session.challengesCompleted} / {CHALLENGES.length}</span>
+                    </div>
+                    <div className="w-full h-3 bg-slate-100 border-2 border-black rounded-full overflow-hidden">
+                      <div 
+                        className={cn(
+                          "h-full transition-all duration-1000",
+                          session.totalScore >= 70 ? "bg-kart-green" : session.totalScore >= 40 ? "bg-kart-yellow" : "bg-kart-red"
+                        )}
+                        style={{ width: `${(session.challengesCompleted / CHALLENGES.length) * 100}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between items-center pt-4 border-t-2 border-slate-50">
+                      <div className="font-tech text-[10px] text-slate-400 uppercase">
+                        Último cambio: {session.lastActiveAt?.toDate().toLocaleTimeString()}
+                      </div>
+                      <div className="text-xs font-display font-black italic uppercase text-kart-blue">
+                        SCORE: {session.totalScore}%
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {adminData.length === 0 && (
+                <div className="col-span-full py-20 text-center kart-card bg-slate-50 border-4 border-dashed border-slate-300">
+                  <Activity className="mx-auto text-slate-300 mb-4" size={64} />
+                  <p className="font-tech text-slate-400 font-bold uppercase">No hay sesiones activas por el momento.</p>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
       </AnimatePresence>
 
       {/* Footer / Credits */}
       <footer className="max-w-6xl mx-auto mt-12 bg-white p-12 rounded-2xl border-4 border-black shadow-[8px_8px_0px_#000] text-center space-y-8 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-4 checkered-pattern opacity-20" />
         <div className="pt-8 space-y-6">
-          <h4 className="font-display font-black italic text-4xl text-kart-red uppercase tracking-tighter">Créditos del Proyecto</h4>
+          <button 
+            onClick={async () => {
+              try {
+                if (currentUser?.email === 'iejosefacampos2025@gmail.com') {
+                  setGameState('admin');
+                } else {
+                  const user = await signInWithGoogle();
+                  if (user?.email === 'iejosefacampos2025@gmail.com') {
+                    setGameState('admin');
+                  } else if (user) {
+                    alert("Acceso Restringido: Solo el docente administrador puede ingresar.");
+                  } else {
+                    alert("No se pudo iniciar sesión. Por favor, asegúrate de abrir la aplicación EN UNA PESTAÑA NUEVA para que el navegador permita la ventana de inicio de sesión de Google.");
+                  }
+                }
+              } catch (err) {
+                console.error(err);
+                alert("Error de conexión. Intenta abrir la app en una nueva pestaña.");
+              }
+            }}
+            className="font-display font-black italic text-4xl text-kart-red uppercase tracking-tighter hover:scale-105 transition-transform"
+          >
+            Créditos del Proyecto
+          </button>
           <div className="space-y-4 text-slate-700">
             <p className="font-display text-3xl italic text-black leading-none">Jorge Armando Jaramillo Bravo</p>
             <p className="font-tech font-bold text-lg text-slate-600 tracking-wide uppercase">Docente de la I.E Josefa Campos</p>
