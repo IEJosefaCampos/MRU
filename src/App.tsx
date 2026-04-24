@@ -501,12 +501,42 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <footer className="max-w-6xl mx-auto mt-12 bg-white p-8 border-4 border-black text-center space-y-4">
-        <button onClick={async () => {
-           if (currentUser?.email === 'iejosefacampos2025@gmail.com') setGameState('admin');
-           else { const u = await signInWithGoogle(); if (u?.email === 'iejosefacampos2025@gmail.com') setGameState('admin'); }
-        }} className="font-display font-black italic text-3xl text-kart-red uppercase">Créditos del Proyecto</button>
-        <div className="font-tech font-bold uppercase text-slate-600">Jorge Armando Jaramillo Bravo | Docente I.E Josefa Campos</div>
+      <footer className="max-w-6xl mx-auto mt-12 bg-white p-12 rounded-2xl border-4 border-black shadow-[8px_8px_0px_#000] text-center space-y-8 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-4 checkered-pattern opacity-10" />
+        <div className="pt-8 space-y-6">
+          <button 
+            onClick={async () => {
+              try {
+                if (currentUser?.email === 'iejosefacampos2025@gmail.com') {
+                  setGameState('admin');
+                } else {
+                  const user = await signInWithGoogle();
+                  if (user?.email === 'iejosefacampos2025@gmail.com') {
+                    setGameState('admin');
+                  } else if (user) {
+                    alert("Acceso Restringido: Solo el docente administrador puede ingresar al panel de monitoreo.");
+                  }
+                }
+              } catch (err) {
+                console.error(err);
+                alert("Para acceder a los créditos o administración, abre la app en una nueva pestaña.");
+              }
+            }}
+            className="font-display font-black italic text-4xl text-kart-red uppercase tracking-tighter hover:scale-105 transition-transform"
+          >
+            Créditos del Proyecto
+          </button>
+          <div className="space-y-4">
+            <p className="font-display text-4xl italic text-black leading-none uppercase">Jorge Armando Jaramillo Bravo</p>
+            <p className="font-tech font-bold text-xl text-slate-600 tracking-wide uppercase">Docente de la I.E Josefa Campos</p>
+            <div className="flex flex-col gap-2 font-tech text-[10px] text-slate-500 mt-8 uppercase tracking-widest">
+              <p className="bg-slate-50 border border-slate-200 py-1 px-4 rounded-full inline-block mx-auto">Lic. matemáticas y física (UdeA)</p>
+              <p className="bg-slate-50 border border-slate-200 py-1 px-4 rounded-full inline-block mx-auto">Mag. Enseñanza de las ciencias exactas y naturales (UNAL)</p>
+              <p className="bg-slate-50 border border-slate-200 py-1 px-4 rounded-full inline-block mx-auto">Doctorante en Educación (UTEL)</p>
+            </div>
+          </div>
+        </div>
+        <div className="absolute bottom-0 left-0 w-full h-4 checkered-pattern opacity-10" />
       </footer>
     </div>
   );
