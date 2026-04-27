@@ -27,9 +27,27 @@
         "timestamp": { "type": "string", "format": "date-time", "description": "When the answer was submitted" }
       },
       "required": ["challengeId", "answer", "isCorrect", "timestamp"]
+    },
+    "users": {
+      "title": "User Profile",
+      "description": "Extended user information stored upon registration.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "age": { "type": "integer" },
+        "grade": { "type": "string" },
+        "institution": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "email", "grade", "institution"]
     }
   },
   "firestore": {
+    "/users/{userId}": {
+      "schema": "users",
+      "description": "Stores profile data for registered students."
+    },
     "/sessions/{sessionId}": {
       "schema": "sessions",
       "description": "Root collection for student sessions."

@@ -12,21 +12,31 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     
     // Admin check: Only the project owner/specified user email
-    // For this educational app, we'll allow public creation but restricted reading for the admin panel
     function isAdmin() { 
       return isSignedIn() && (request.auth.token.email == 'iejosefacampos2025@gmail.com' && request.auth.token.email_verified == true);
     }
 
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if isSignedIn() && (isOwner(userId) || isAdmin());
+      allow create: if isSignedIn() && isOwner(userId);
+      allow update: if isSignedIn() && isOwner(userId);
+    }
+
     // Sessions collection
     match /sessions/{sessionId} {
-      allow create: if true; // Allow anonymous session creation for students
-      allow update: if true; // Allow students to update their own coins/score
-      allow read: if isAdmin(); // Only Admin can see all sessions
+      allow create: if isSignedIn(); 
+      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       
       // Responses subcollection
       match /responses/{responseId} {
-        allow create: if true; 
-        allow read: if isAdmin();
+        allow create: if isSignedIn(); 
+        allow read: if isSignedIn() && (get(/databases/$(database)/documents/sessions/$(sessionId)).data.userId == request.auth.uid || isAdmin());
       }
     }
   }

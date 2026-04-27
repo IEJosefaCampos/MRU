@@ -53,14 +53,27 @@ import {
   doc, 
   onSnapshot, 
   query, 
-  orderBy 
+  orderBy,
+  where,
+  getDocs,
+  getDoc,
+  setDoc,
+  limit
 } from 'firebase/firestore';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { db, auth, signInWithGoogle } from './lib/firebase';
+import { 
+  db, 
+  auth, 
+  signInWithGoogle, 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  signOut 
+} from './lib/firebase';
 import { cn } from './lib/utils';
+import { LogOut, Mail, Lock, UserPlus, LogIn, School, Hash } from 'lucide-react';
 
 type Mode = 'distance' | 'time' | 'velocity' | 'meeting';
-type GameState = 'intro' | 'character_selection' | 'playing' | 'results' | 'admin';
+type GameState = 'intro' | 'auth' | 'register' | 'login' | 'character_selection' | 'playing' | 'results' | 'admin';
 
 interface Character {
   id: string;
@@ -143,11 +156,56 @@ export default function App() {
 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [userProfile, setUserProfile] = useState<any>(null);
   const [adminData, setAdminData] = useState<any[]>([]);
 
+  // Auth/Register form states
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [age, setAge] = useState('');
+  const [institution, setInstitution] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+
   useEffect(() => {
-    return onAuthStateChanged(auth, (user) => {
+    return onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
+      if (user) {
+        // Fetch user profile
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const profile = userDoc.data();
+          setUserProfile(profile);
+          setUserName(profile.fullName);
+          setUserGrade(profile.grade);
+          
+          // Try to resume session
+          const q = query(
+            collection(db, 'sessions'), 
+            where('userId', '==', user.uid),
+            orderBy('lastActiveAt', 'desc'),
+            limit(1)
+          );
+          const sessionSnap = await getDocs(q);
+          if (!sessionSnap.empty) {
+            const lastSession = sessionSnap.docs[0];
+            const data = lastSession.data();
+            setSessionId(lastSession.id);
+            setCoins(data.coins || 0);
+            setCurrentChallengeIdx(data.challengesCompleted || 0);
+            if (data.selectedCharId) {
+              const char = CHARACTERS.find(c => c.id === data.selectedCharId);
+              if (char) setSelectedChar(char);
+            }
+          }
+        }
+      } else {
+        setUserProfile(null);
+        setSessionId(null);
+        setCoins(0);
+        setCurrentChallengeIdx(0);
+      }
     });
   }, []);
 
@@ -176,6 +234,7 @@ export default function App() {
   const startSession = async () => {
     try {
       const docRef = await addDoc(collection(db, 'sessions'), {
+        userId: currentUser?.uid || null,
         userName,
         userGrade,
         selectedCharId: selectedChar?.id,
@@ -189,6 +248,51 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setIsAuthLoading(true);
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+      
+      // Save profile
+      await setDoc(doc(db, 'users', user.uid), {
+        fullName,
+        email,
+        age: parseInt(age),
+        grade: userGrade,
+        institution,
+        createdAt: serverTimestamp()
+      });
+      
+      setGameState('character_selection');
+    } catch (err: any) {
+      setAuthError(err.message);
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setIsAuthLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      setGameState('character_selection');
+    } catch (err: any) {
+      setAuthError(err.message);
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    setGameState('intro');
   };
 
   const updateSession = async (newCoins: number, correct: boolean, studentAnswer: string) => {
@@ -323,13 +427,149 @@ export default function App() {
   return (
     <div className="min-h-screen bg-kart-sky p-4 font-sans selection:bg-kart-yellow">
       <AnimatePresence mode="wait">
+        {/* INTRO SCREEN */}
         {gameState === 'intro' && (
-          <motion.div key="intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-2xl mx-auto mt-20 p-12 bg-white border-4 border-black text-center space-y-8 shadow-[10px_10px_0px_#000]">
+          <motion.div key="intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="max-w-2xl mx-auto mt-20 p-12 bg-white border-4 border-black text-center space-y-8 shadow-[10px_10px_0px_#000]">
             <Star size={64} className="mx-auto text-kart-red font-black" />
             <h1 className="text-5xl font-display font-black italic uppercase text-kart-red">MRU HEROES</h1>
-            <input placeholder="Nombre" value={userName} onChange={e => setUserName(e.target.value)} className="w-full p-4 border-4 border-black font-tech" />
-            <input placeholder="Grado" value={userGrade} onChange={e => setUserGrade(e.target.value)} className="w-full p-4 border-4 border-black font-tech" />
-            <button onClick={() => setGameState('character_selection')} disabled={!userName || !userGrade} className="kart-button w-full bg-kart-red text-white py-4 text-2xl">EMPEZAR</button>
+            <p className="font-tech text-slate-500 uppercase tracking-widest text-sm">Entrenamiento Galáctico de Física</p>
+            
+            {!currentUser ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button 
+                  onClick={() => setGameState('register')} 
+                  className="kart-button bg-kart-green text-white py-4 text-xl flex items-center justify-center gap-2"
+                >
+                  <UserPlus size={20} /> REGISTRARSE
+                </button>
+                <button 
+                  onClick={() => setGameState('login')} 
+                  className="kart-button bg-kart-blue text-white py-4 text-xl flex items-center justify-center gap-2"
+                >
+                  <LogIn size={20} /> INICIAR SESIÓN
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="font-display font-black italic text-2xl text-kart-blue uppercase">HOLA DE NUEVO, {userProfile?.fullName || userName}!</p>
+                <button 
+                  onClick={() => setGameState('character_selection')} 
+                  className="kart-button w-full bg-kart-red text-white py-4 text-2xl"
+                >
+                  CONTINUAR MISIÓN
+                </button>
+                <button 
+                  onClick={handleLogout}
+                  className="text-slate-400 font-tech text-xs uppercase hover:text-kart-red transition-colors flex items-center justify-center gap-2 mx-auto"
+                >
+                  <LogOut size={12} /> Cerrar Sesión
+                </button>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* REGISTER SCREEN */}
+        {gameState === 'register' && (
+          <motion.div 
+            key="register" 
+            initial={{ opacity: 0, x: 100 }} 
+            animate={{ opacity: 1, x: 0 }} 
+            exit={{ opacity: 0, x: -100 }}
+            className="max-w-xl mx-auto mt-10 p-8 bg-white/90 backdrop-blur-md border-4 border-black shadow-[10px_10px_0px_#000] space-y-6 relative overflow-hidden"
+            style={{
+              backgroundImage: 'url(https://i.postimg.cc/zBJfmTZ7/inercia2.png)',
+              backgroundSize: '300px',
+              backgroundPosition: 'bottom right',
+              backgroundRepeat: 'no-repeat'
+            }}
+          >
+            <div className="absolute top-0 left-0 w-full h-2 bg-kart-green" />
+            <h2 className="text-4xl font-display font-black italic uppercase text-kart-green">Registro de Piloto</h2>
+            <form onSubmit={handleRegister} className="space-y-4 relative z-10">
+              <div className="space-y-2">
+                <label className="text-[10px] font-tech font-black uppercase text-slate-500 flex items-center gap-1">
+                  <User size={12} /> Nombre Completo
+                </label>
+                <input required value={fullName} onChange={e => setFullName(e.target.value)} className="w-full p-3 border-2 border-black font-tech" placeholder="Ej: Juan Pérez" />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-tech font-black uppercase text-slate-500 flex items-center gap-1">
+                    <Mail size={12} /> Correo
+                  </label>
+                  <input required type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-3 border-2 border-black font-tech" placeholder="correo@ejemplo.com" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-tech font-black uppercase text-slate-500 flex items-center gap-1">
+                    <Lock size={12} /> Contraseña
+                  </label>
+                  <input required type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-3 border-2 border-black font-tech" placeholder="******" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-tech font-black uppercase text-slate-500 flex items-center gap-1">
+                    <Hash size={12} /> Edad
+                  </label>
+                  <input required type="number" value={age} onChange={e => setAge(e.target.value)} className="w-full p-3 border-2 border-black font-tech" placeholder="15" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-tech font-black uppercase text-slate-500 flex items-center gap-1">
+                    <GraduationCap size={12} /> Grado
+                  </label>
+                  <input required value={userGrade} onChange={e => setUserGrade(e.target.value)} className="w-full p-3 border-2 border-black font-tech" placeholder="10° A" />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-tech font-black uppercase text-slate-500 flex items-center gap-1">
+                  <School size={12} /> Institución Educativa
+                </label>
+                <input required value={institution} onChange={e => setInstitution(e.target.value)} className="w-full p-3 border-2 border-black font-tech" placeholder="I.E Josefa Campos" />
+              </div>
+
+              {authError && <p className="text-kart-red font-tech text-xs bg-kart-red/10 p-2 border border-kart-red uppercase">{authError}</p>}
+
+              <div className="pt-4 flex items-center justify-between">
+                <button onClick={() => setGameState('intro')} type="button" className="text-slate-400 font-tech text-xs uppercase font-bold hover:text-black">Volver</button>
+                <button disabled={isAuthLoading} type="submit" className="kart-button bg-kart-green text-white px-8 py-3 text-lg">
+                  {isAuthLoading ? 'REGISTRANDO...' : '¡LISTO PARA VOLAR!'}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        )}
+
+        {/* LOGIN SCREEN */}
+        {gameState === 'login' && (
+          <motion.div 
+            key="login" 
+            initial={{ opacity: 0, x: -100 }} 
+            animate={{ opacity: 1, x: 0 }} 
+            exit={{ opacity: 0, x: 100 }}
+            className="max-w-md mx-auto mt-20 p-10 bg-white border-4 border-black shadow-[10px_10px_0px_#000] space-y-6"
+          >
+            <h2 className="text-4xl font-display font-black italic uppercase text-kart-blue">ACCESO AL HANGAR</h2>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-tech font-black uppercase text-slate-500">Correo Electrónico</label>
+                <input required type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-4 border-2 border-black font-tech" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-tech font-black uppercase text-slate-500">Contraseña</label>
+                <input required type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-4 border-2 border-black font-tech" />
+              </div>
+              {authError && <p className="text-kart-red font-tech text-xs bg-kart-red/10 p-2 border border-kart-red uppercase">{authError}</p>}
+              <div className="pt-4 flex flex-col gap-4">
+                <button disabled={isAuthLoading} type="submit" className="kart-button bg-kart-blue text-white py-4 text-xl">
+                  {isAuthLoading ? 'ENTRANDO...' : 'INICIAR SESIÓN'}
+                </button>
+                <button onClick={() => setGameState('intro')} type="button" className="text-slate-400 font-tech text-xs uppercase font-bold text-center">Volver</button>
+              </div>
+            </form>
           </motion.div>
         )}
 
@@ -353,12 +593,26 @@ export default function App() {
             <div className="flex items-center justify-between bg-white p-4 border-4 border-black shadow-[6px_6px_0px_#000]">
                <div className="flex items-center gap-4">
                  <img src={selectedChar?.image} className="w-16 h-16 object-contain" />
-                 <div><p className="font-display font-black italic text-xl uppercase">{userName}</p><p className="font-tech text-xs text-slate-400">{userGrade}</p></div>
+                 <div>
+                   <p className="font-display font-black italic text-xl uppercase leading-none">{userName}</p>
+                   <p className="font-tech text-xs text-slate-400 uppercase">{userGrade} | {userProfile?.institution || 'PILOTO'}</p>
+                 </div>
                </div>
-               <div className="flex gap-4">
-                 <div className="bg-kart-yellow p-2 border-2 border-black font-tech font-bold">COINS: {coins}</div>
-                 <button onClick={() => setSoundEnabled(!soundEnabled)} className="p-2 border-2 border-black">{soundEnabled ? <Zap /> : <Skull />}</button>
-                 <button onClick={() => setShowChallenge(true)} className="bg-kart-red text-white p-2 border-2 border-black font-tech text-xs">MISIÓN</button>
+               <div className="flex gap-4 items-center">
+                 <div className="bg-kart-yellow p-2 border-2 border-black font-tech font-bold flex items-center gap-2">
+                   <Coins size={16} /> COINS: {coins}
+                 </div>
+                 <button onClick={() => setSoundEnabled(!soundEnabled)} className="p-2 border-2 border-black bg-white">
+                   {soundEnabled ? <Zap className="text-kart-blue" /> : <Skull className="text-slate-400" />}
+                 </button>
+                 <button 
+                  onClick={handleLogout}
+                  className="p-2 border-2 border-black bg-white hover:bg-kart-red hover:text-white transition-colors group"
+                  title="Cerrar Sesión"
+                >
+                   <LogOut size={20} />
+                 </button>
+                 <button onClick={() => setShowChallenge(true)} className="bg-kart-red text-white p-2 px-4 shadow-[3px_3px_0px_#000] border-2 border-black font-tech text-xs uppercase italic">MISIÓN</button>
                </div>
             </div>
 
@@ -501,9 +755,8 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <footer className="max-w-6xl mx-auto mt-12 bg-white p-12 rounded-2xl border-4 border-black shadow-[8px_8px_0px_#000] text-center space-y-8 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-4 checkered-pattern opacity-10" />
-        <div className="pt-8 space-y-6">
+      <footer className="max-w-6xl mx-auto mt-20 mb-10 text-center space-y-4">
+        <div className="flex flex-col items-center gap-3">
           <button 
             onClick={async () => {
               try {
@@ -519,24 +772,24 @@ export default function App() {
                 }
               } catch (err) {
                 console.error(err);
-                alert("Para acceder a los créditos o administración, abre la app en una nueva pestaña.");
+                alert("Para acceder a la administración, abre la app en una nueva pestaña.");
               }
             }}
-            className="font-display font-black italic text-4xl text-kart-red uppercase tracking-tighter hover:scale-105 transition-transform"
+            className="font-display font-black italic text-xl text-kart-red uppercase tracking-tighter hover:opacity-70 transition-opacity"
           >
             Créditos del Proyecto
           </button>
-          <div className="space-y-4">
-            <p className="font-display text-4xl italic text-black leading-none uppercase">Jorge Armando Jaramillo Bravo</p>
-            <p className="font-tech font-bold text-xl text-slate-600 tracking-wide uppercase">Docente de la I.E Josefa Campos</p>
-            <div className="flex flex-col gap-2 font-tech text-[10px] text-slate-500 mt-8 uppercase tracking-widest">
-              <p className="bg-slate-50 border border-slate-200 py-1 px-4 rounded-full inline-block mx-auto">Lic. matemáticas y física (UdeA)</p>
-              <p className="bg-slate-50 border border-slate-200 py-1 px-4 rounded-full inline-block mx-auto">Mag. Enseñanza de las ciencias exactas y naturales (UNAL)</p>
-              <p className="bg-slate-50 border border-slate-200 py-1 px-4 rounded-full inline-block mx-auto">Doctorante en Educación (UTEL)</p>
-            </div>
+          
+          <div className="flex flex-col gap-1 font-tech text-[10px] text-slate-500 uppercase tracking-widest">
+            <p className="font-bold flex items-center justify-center gap-2">
+              <span>Jorge Armando Jaramillo Bravo</span>
+              <span className="w-1 h-1 bg-slate-300 rounded-full" />
+              <span>Docente I.E Josefa Campos</span>
+            </p>
+            <p className="opacity-50">Lic. matemáticas y física (UdeA) | Mag. Enseñanza (UNAL) | Doctorante en Educación (UTEL)</p>
+            <p className="mt-2 text-slate-400 font-black italic">@Laboratorio virtual Josefa Campos</p>
           </div>
         </div>
-        <div className="absolute bottom-0 left-0 w-full h-4 checkered-pattern opacity-10" />
       </footer>
     </div>
   );

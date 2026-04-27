@@ -1,6 +1,13 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
-import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut
+} from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
@@ -14,10 +21,11 @@ export const signInWithGoogle = async () => {
     return result.user;
   } catch (error: any) {
     console.error("Error signing in with Google:", error.code, error.message);
-    // If the error is about an unauthorized domain, show a specific alert
     if (error.code === 'auth/unauthorized-domain') {
       alert("Error: El dominio actual no está autorizado en Firebase. Por favor, agregue este dominio a la lista de dominios autorizados en la consola de Firebase.");
     }
     return null;
   }
 };
+
+export { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut };
