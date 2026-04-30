@@ -143,6 +143,9 @@ const CHALLENGES: Challenge[] = [
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>('intro');
+  const [isPracticeMode, setIsPracticeMode] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
   const [userName, setUserName] = useState('');
   const [userGrade, setUserGrade] = useState('');
   const [selectedChar, setSelectedChar] = useState<Character | null>(null);
@@ -158,6 +161,47 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [adminData, setAdminData] = useState<any[]>([]);
+  const [adminSearch, setAdminSearch] = useState('');
+  const [adminGradeFilter, setAdminGradeFilter] = useState('ALL');
+  const [adminSortBy, setAdminSortBy] = useState<'date' | 'score'>('date');
+
+  const filteredAdminData = useMemo(() => {
+    let data = [...adminData];
+    
+    if (adminSearch) {
+      data = data.filter(s => s.userName?.toLowerCase().includes(adminSearch.toLowerCase()));
+    }
+    
+    if (adminGradeFilter !== 'ALL') {
+      data = data.filter(s => s.userGrade === adminGradeFilter);
+    }
+    
+    data.sort((a, b) => {
+      if (adminSortBy === 'date') {
+        return (b.lastActiveAt?.seconds || 0) - (a.lastActiveAt?.seconds || 0);
+      }
+      return (b.totalScore || 0) - (a.totalScore || 0);
+    });
+    
+    return data;
+  }, [adminData, adminSearch, adminGradeFilter, adminSortBy]);
+
+  const uniqueGrades = useMemo(() => {
+    const grades = new Set(adminData.map(s => s.userGrade).filter(Boolean));
+    return Array.from(grades).sort();
+  }, [adminData]);
+
+  const adminStats = useMemo(() => {
+    const stats = { superior: 0, alto: 0, basico: 0, bajo: 0 };
+    adminData.forEach(s => {
+      const score = s.totalScore || 0;
+      if (score >= 90) stats.superior++;
+      else if (score >= 75) stats.alto++;
+      else if (score >= 60) stats.basico++;
+      else stats.bajo++;
+    });
+    return stats;
+  }, [adminData]);
 
   // Auth/Register form states
   const [email, setEmail] = useState('');
@@ -295,6 +339,20 @@ export default function App() {
     setGameState('intro');
   };
 
+  const resetSim = () => {
+    setSimTime(0);
+    setIsRunning(false);
+    setHasCelebrated(false);
+  };
+
+  const handleInputChange = (field: 'v' | 't' | 'd', value: string) => {
+    const val = Number(value);
+    if (field === 'v') setVelocity(val);
+    else if (field === 't') setTime(val);
+    else if (field === 'd') setDistance(val);
+    resetSim();
+  };
+
   const updateSession = async (newCoins: number, correct: boolean, studentAnswer: string) => {
     if (!sessionId) return;
     try {
@@ -378,12 +436,48 @@ export default function App() {
 
   const playSound = (type: string) => {
     if (!soundEnabled) return;
-    const ctx = new AudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    if (type === 'success') { osc.frequency.setValueAtTime(523, ctx.currentTime); osc.start(); osc.stop(ctx.currentTime + 0.2); }
-    else if (type === 'fail') { osc.frequency.setValueAtTime(220, ctx.currentTime); osc.start(); osc.stop(ctx.currentTime + 0.3); }
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'success') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.1); // A5
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.3);
+      } else if (type === 'fail') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(220, ctx.currentTime); // A3
+        osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.2); // A2
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.3);
+      } else if (type === 'click') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0.05, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.1);
+      } else if (type === 'start') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.2);
+      }
+    } catch (e) {
+      console.warn("Audio error:", e);
+    }
   };
 
   const handleAnswer = (answer: string) => {
@@ -437,13 +531,13 @@ export default function App() {
             {!currentUser ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <button 
-                  onClick={() => setGameState('register')} 
+                  onClick={() => { setGameState('register'); playSound('click'); }} 
                   className="kart-button bg-kart-green text-white py-4 text-xl flex items-center justify-center gap-2"
                 >
                   <UserPlus size={20} /> REGISTRARSE
                 </button>
                 <button 
-                  onClick={() => setGameState('login')} 
+                  onClick={() => { setGameState('login'); playSound('click'); }} 
                   className="kart-button bg-kart-blue text-white py-4 text-xl flex items-center justify-center gap-2"
                 >
                   <LogIn size={20} /> INICIAR SESIÓN
@@ -453,13 +547,13 @@ export default function App() {
               <div className="space-y-4">
                 <p className="font-display font-black italic text-2xl text-kart-blue uppercase">HOLA DE NUEVO, {userProfile?.fullName || userName}!</p>
                 <button 
-                  onClick={() => setGameState('character_selection')} 
+                  onClick={() => { setGameState('character_selection'); playSound('click'); }} 
                   className="kart-button w-full bg-kart-red text-white py-4 text-2xl"
                 >
                   CONTINUAR MISIÓN
                 </button>
                 <button 
-                  onClick={handleLogout}
+                  onClick={() => { handleLogout(); playSound('click'); }}
                   className="text-slate-400 font-tech text-xs uppercase hover:text-kart-red transition-colors flex items-center justify-center gap-2 mx-auto"
                 >
                   <LogOut size={12} /> Cerrar Sesión
@@ -534,8 +628,8 @@ export default function App() {
               {authError && <p className="text-kart-red font-tech text-xs bg-kart-red/10 p-2 border border-kart-red uppercase">{authError}</p>}
 
               <div className="pt-4 flex items-center justify-between">
-                <button onClick={() => setGameState('intro')} type="button" className="text-slate-400 font-tech text-xs uppercase font-bold hover:text-black">Volver</button>
-                <button disabled={isAuthLoading} type="submit" className="kart-button bg-kart-green text-white px-8 py-3 text-lg">
+                <button onClick={() => { setGameState('intro'); playSound('click'); }} type="button" className="text-slate-400 font-tech text-xs uppercase font-bold hover:text-black">Volver</button>
+                <button disabled={isAuthLoading} type="submit" onClick={() => playSound('click')} className="kart-button bg-kart-green text-white px-8 py-3 text-lg">
                   {isAuthLoading ? 'REGISTRANDO...' : '¡LISTO PARA VOLAR!'}
                 </button>
               </div>
@@ -564,10 +658,10 @@ export default function App() {
               </div>
               {authError && <p className="text-kart-red font-tech text-xs bg-kart-red/10 p-2 border border-kart-red uppercase">{authError}</p>}
               <div className="pt-4 flex flex-col gap-4">
-                <button disabled={isAuthLoading} type="submit" className="kart-button bg-kart-blue text-white py-4 text-xl">
+                <button disabled={isAuthLoading} type="submit" onClick={() => playSound('click')} className="kart-button bg-kart-blue text-white py-4 text-xl">
                   {isAuthLoading ? 'ENTRANDO...' : 'INICIAR SESIÓN'}
                 </button>
-                <button onClick={() => setGameState('intro')} type="button" className="text-slate-400 font-tech text-xs uppercase font-bold text-center">Volver</button>
+                <button onClick={() => { setGameState('intro'); playSound('click'); }} type="button" className="text-slate-400 font-tech text-xs uppercase font-bold text-center">Volver</button>
               </div>
             </form>
           </motion.div>
@@ -578,13 +672,13 @@ export default function App() {
             <h2 className="text-center text-4xl font-display font-black italic uppercase text-kart-blue">Elige tu Piloto</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
               {CHARACTERS.map(char => (
-                <button key={char.id} onClick={() => setSelectedChar(char)} className={cn("p-4 border-4 border-black bg-white", selectedChar?.id === char.id && "bg-kart-yellow")}>
+                <button key={char.id} onClick={() => { setSelectedChar(char); playSound('click'); }} className={cn("p-4 border-4 border-black bg-white", selectedChar?.id === char.id && "bg-kart-yellow")}>
                   <img src={char.image} alt={char.name} className="w-full" />
                   <p className="font-display font-bold italic mt-2">{char.name}</p>
                 </button>
               ))}
             </div>
-            <button onClick={() => { startSession(); setGameState('playing'); }} disabled={!selectedChar} className="kart-button mx-auto block bg-kart-green text-white px-20 py-4">GO!</button>
+            <button onClick={() => { startSession(); setGameState('playing'); playSound('start'); }} disabled={!selectedChar} className="kart-button mx-auto block bg-kart-green text-white px-20 py-4">GO!</button>
           </motion.div>
         )}
 
@@ -599,20 +693,50 @@ export default function App() {
                  </div>
                </div>
                <div className="flex gap-4 items-center">
-                 <div className="bg-kart-yellow p-2 border-2 border-black font-tech font-bold flex items-center gap-2">
-                   <Coins size={16} /> COINS: {coins}
-                 </div>
-                 <button onClick={() => setSoundEnabled(!soundEnabled)} className="p-2 border-2 border-black bg-white">
-                   {soundEnabled ? <Zap className="text-kart-blue" /> : <Skull className="text-slate-400" />}
-                 </button>
                  <button 
-                  onClick={handleLogout}
+                  onClick={() => {
+                    setShowTutorial(true);
+                    setTutorialStep(0);
+                    playSound('click');
+                  }}
+                  className="flex items-center gap-2 font-tech text-[10px] text-slate-400 hover:text-kart-blue uppercase transition-colors"
+                >
+                  <Info size={14} /> Tutorial
+                </button>
+                 <div className="bg-kart-yellow p-2 border-2 border-black font-tech font-bold flex items-center gap-2">
+                    <Coins size={16} /> COINS: {coins}
+                 </div>
+                 <div className="flex items-center bg-slate-100 p-1 border-2 border-black">
+                  <button 
+                    onClick={() => { setIsPracticeMode(false); playSound('click'); }}
+                    className={cn(
+                      "px-3 py-1 text-[10px] font-black uppercase transition-all",
+                      !isPracticeMode ? "bg-kart-red text-white" : "text-slate-400"
+                    )}
+                  >
+                    Misión
+                  </button>
+                  <button 
+                    onClick={() => { setIsPracticeMode(true); playSound('click'); }}
+                    className={cn(
+                      "px-3 py-1 text-[10px] font-black uppercase transition-all",
+                      isPracticeMode ? "bg-kart-blue text-white" : "text-slate-400"
+                    )}
+                  >
+                    Libre
+                  </button>
+                </div>
+                  <button onClick={() => { setSoundEnabled(!soundEnabled); if (!soundEnabled) playSound('click'); }} className="p-2 border-2 border-black bg-white">
+                    {soundEnabled ? <Zap className="text-kart-blue" /> : <Skull className="text-slate-400" />}
+                  </button>
+                  <button 
+                  onClick={() => { handleLogout(); playSound('click'); }}
                   className="p-2 border-2 border-black bg-white hover:bg-kart-red hover:text-white transition-colors group"
                   title="Cerrar Sesión"
                 >
                    <LogOut size={20} />
                  </button>
-                 <button onClick={() => setShowChallenge(true)} className="bg-kart-red text-white p-2 px-4 shadow-[3px_3px_0px_#000] border-2 border-black font-tech text-xs uppercase italic">MISIÓN</button>
+                 <button onClick={() => { setShowChallenge(true); playSound('click'); }} className="bg-kart-red text-white p-2 px-4 shadow-[3px_3px_0px_#000] border-2 border-black font-tech text-xs uppercase italic">MISIÓN</button>
                </div>
             </div>
 
@@ -626,20 +750,89 @@ export default function App() {
                   <img src={selectedChar?.image} className="absolute bottom-10 left-10 w-24 z-10" />
                   <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-black text-white p-2 font-tech">T: {simTime.toFixed(1)}s | D: {(simTime * effV).toFixed(1)}m</div>
                   <div className="absolute left-10 bottom-10 flex gap-4">
-                    <button onClick={() => setIsRunning(!isRunning)} className="bg-kart-green p-4 border-4 border-black">{isRunning ? <Pause /> : <Play />}</button>
-                    <button onClick={() => { setSimTime(0); setIsRunning(false); }} className="bg-kart-red p-4 border-4 border-black"><RotateCcw /></button>
+                    <button onClick={() => { setIsRunning(!isRunning); playSound('click'); }} className="bg-kart-green p-4 border-4 border-black">{isRunning ? <Pause /> : <Play />}</button>
+                    <button onClick={() => { setSimTime(0); setIsRunning(false); playSound('click'); }} className="bg-kart-red p-4 border-4 border-black"><RotateCcw /></button>
                   </div>
                </div>
             </section>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-               <div className="md:col-span-1 p-6 bg-white border-4 border-black space-y-4 font-tech">
-                 <p className="text-xs font-bold uppercase italic text-kart-blue">Ajustes MRU</p>
-                 <label className="block text-[10px]">VELOCIDAD: {velocity}m/s</label>
-                 <input type="range" max="200" value={velocity} onChange={e => setVelocity(Number(e.target.value))} className="w-full" />
-                 <div className="bg-kart-yellow p-4 border-4 border-black text-center font-display text-2xl italic">RESULTADO: {calculatedValue.toFixed(1)}</div>
+               <div className={cn(
+                  "md:col-span-1 p-6 space-y-6 bg-white border-4 border-black relative overflow-hidden",
+                  tutorialStep === 1 && showTutorial && "ring-8 ring-kart-yellow z-[60]"
+                )}>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-display text-xs uppercase italic text-slate-400">Hangar de Ajustes</p>
+                    {isPracticeMode && <span className="bg-kart-blue text-white text-[8px] px-2 py-0.5 rounded font-black italic">PRÁCTICA</span>}
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-2">
+                    {(['distance', 'velocity', 'time', 'meeting'] as Mode[]).map(m => (
+                      <button 
+                        key={m}
+                        onClick={() => { setMode(m); resetSim(); playSound('click'); }}
+                        className={cn(
+                          "px-2 py-1 rounded font-display text-[9px] uppercase border-2 border-black",
+                          m === mode ? "bg-kart-red text-white" : "bg-white"
+                        )}
+                      >
+                        {m === 'distance' ? 'Distancia' : m === 'velocity' ? 'Velocidad' : m === 'time' ? 'Tiempo' : 'Encuentro'}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className={cn("space-y-1", mode === 'velocity' && !isPracticeMode && "opacity-50")}>
+                      <div className="flex justify-between items-end">
+                        <label className="text-[9px] font-tech font-black uppercase text-slate-500">Velocidad (v)</label>
+                        <span className="text-lg font-display font-black italic text-kart-red leading-none">{velocity} m/s</span>
+                      </div>
+                      <input 
+                        type="range" min="0" max="200" step="1" value={velocity} 
+                        disabled={mode === 'velocity' && !isPracticeMode}
+                        onChange={(e) => handleInputChange('v', e.target.value)} 
+                        className="w-full accent-kart-red h-1.5"
+                      />
+                    </div>
+
+                    <div className={cn("space-y-1", mode === 'time' && !isPracticeMode && "opacity-50")}>
+                      <div className="flex justify-between items-end">
+                        <label className="text-[9px] font-tech font-black uppercase text-slate-500">Tiempo (t)</label>
+                        <span className="text-lg font-display font-black italic text-kart-blue leading-none">{time} s</span>
+                      </div>
+                      <input 
+                        type="range" min="1" max="60" step="1" value={time} 
+                        disabled={mode === 'time' && !isPracticeMode}
+                        onChange={(e) => handleInputChange('t', e.target.value)} 
+                        className="w-full accent-kart-blue h-1.5"
+                      />
+                    </div>
+
+                    {(mode === 'velocity' || mode === 'time' || isPracticeMode) && (
+                      <div className={cn("space-y-1", mode === 'distance' && !isPracticeMode && "opacity-50")}>
+                        <div className="flex justify-between items-end">
+                          <label className="text-[9px] font-tech font-black uppercase text-slate-500">Distancia (d)</label>
+                          <span className="text-lg font-display font-black italic text-kart-green leading-none">{distance} m</span>
+                        </div>
+                        <input 
+                          type="range" min="0" max="2000" step="10" value={distance} 
+                          disabled={mode === 'distance' && !isPracticeMode}
+                          onChange={(e) => handleInputChange('d', e.target.value)} 
+                          className="w-full accent-kart-green h-1.5"
+                        />
+                      </div>
+                    )}
+
+                    <div className="bg-kart-yellow p-3 border-4 border-black text-center relative overflow-hidden">
+                      <p className="text-[9px] font-tech uppercase mb-1">Resultado</p>
+                      <p className="text-2xl font-display font-black italic leading-none">{calculatedValue.toFixed(1)}</p>
+                    </div>
+                  </div>
                </div>
-               <div className="md:col-span-2 p-6 bg-white border-4 border-black h-[300px]">
+               <div className={cn(
+                  "md:col-span-2 p-6 bg-white border-4 border-black h-[300px]",
+                  tutorialStep === 3 && showTutorial && "z-[60] ring-8 ring-kart-yellow"
+                )}>
                  <ResponsiveContainer width="100%" height="100%">
                    <LineChart data={graphData}>
                      <CartesianGrid /> <XAxis dataKey="time" /> <YAxis /> <Tooltip /> <Line dataKey="distance" stroke="#43b02a" strokeWidth={4} dot={false} />
@@ -648,17 +841,56 @@ export default function App() {
                </div>
             </div>
 
+            <AnimatePresence>
+              {showTutorial && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm">
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    className="max-w-md w-full bg-white border-4 border-black p-8 shadow-[12px_12px_0px_#000] relative"
+                  >
+                    <button onClick={() => setShowTutorial(false)} className="absolute top-4 right-4"><XCircle /></button>
+                    <div className="space-y-6 text-center">
+                      <div className="w-16 h-16 bg-kart-red rounded-full flex items-center justify-center text-white font-display text-2xl border-4 border-black mx-auto">
+                        {tutorialStep + 1}
+                      </div>
+                      <h3 className="text-2xl font-display font-black italic uppercase text-kart-red">Entrenamiento de Piloto</h3>
+                      <div className="p-4 bg-slate-50 border-2 border-black font-tech text-base leading-relaxed italic">
+                        {tutorialStep === 0 && "¡Bienvenido! En MRU Heroes dominarás la física para salvar planetas. El MRU describe objetos que se mueven a velocidad constante."}
+                        {tutorialStep === 1 && "En el panel de ajustes eliges qué calcular: Distancia (d), Velocidad (v) o Tiempo (t). ¡Pruébalo ahora!"}
+                        {tutorialStep === 2 && "En EXPLORACIÓN LIBRE, puedes mover todos los deslizadores para ver cómo cambian los resultados instantáneamente."}
+                        {tutorialStep === 3 && "Observa la gráfica. Muestra la relación entre Posición y Tiempo. ¡Cuanto más inclinada la línea, mayor es la velocidad!"}
+                        {tutorialStep === 4 && "¡Listo! Elige el modo MISIONES para ganar monedas y créditos completando desafíos de física reales."}
+                      </div>
+                      <div className="flex justify-between pt-4 border-t-2 border-slate-100">
+                        <button disabled={tutorialStep === 0} onClick={() => { setTutorialStep(s => s - 1); playSound('click'); }} className="font-tech uppercase text-xs disabled:opacity-20">Atrás</button>
+                        <div className="flex gap-1 items-center">
+                          {[0, 1, 2, 3, 4].map(i => <div key={i} className={cn("w-2 h-2 rounded-full", tutorialStep === i ? "bg-kart-red" : "bg-slate-200")} />)}
+                        </div>
+                        {tutorialStep < 4 ? (
+                          <button onClick={() => { setTutorialStep(s => s + 1); playSound('click'); }} className="bg-kart-blue text-white px-6 py-2 font-display italic text-xs border-2 border-black uppercase">Siguiente</button>
+                        ) : (
+                          <button onClick={() => { setShowTutorial(false); playSound('click'); }} className="bg-kart-green text-white px-6 py-2 font-display italic text-xs border-2 border-black uppercase">¡Empezar!</button>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                </div>
+              )}
+            </AnimatePresence>
+
             {showChallenge && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
                 <div className="bg-white border-4 border-black p-8 max-w-xl w-full text-center space-y-6">
                   <h2 className="text-3xl font-display italic font-black text-kart-red uppercase">Misión #{CHALLENGES[currentChallengeIdx].id}</h2>
                   <p className="text-xl font-bold">{CHALLENGES[currentChallengeIdx].question}</p>
                   <div className="grid grid-cols-2 gap-4">
-                    {CHALLENGES[currentChallengeIdx].options.map(opt => <button key={opt} onClick={() => handleAnswer(opt)} className="kart-button border-4 py-4 text-xl">{opt}</button>)}
+                    {CHALLENGES[currentChallengeIdx].options.map(opt => <button key={opt} onClick={() => { handleAnswer(opt); playSound('click'); }} className="kart-button border-4 py-4 text-xl">{opt}</button>)}
                   </div>
                   {feedback && (
                     <div className={cn("p-4 font-black italic", feedback.correct ? "text-kart-green" : "text-kart-red")}>
-                      {feedback.message} <button onClick={nextChallenge} className="bg-black text-white px-6 py-1 ml-4 italic">NEXT</button>
+                      {feedback.message} <button onClick={() => { nextChallenge(); playSound('click'); }} className="bg-black text-white px-6 py-1 ml-4 italic">NEXT</button>
                     </div>
                   )}
                 </div>
@@ -678,78 +910,254 @@ export default function App() {
         )}
 
         {gameState === 'admin' && (
-          <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-6xl mx-auto mt-10 space-y-8">
-            <div className="flex items-center justify-between bg-white p-8 rounded-2xl border-4 border-black shadow-[8px_8px_0px_#000]">
-              <h2 className="text-4xl font-display font-black italic uppercase text-kart-blue">Panel de Resultados</h2>
-              <button onClick={() => setGameState('intro')} className="kart-button bg-slate-100 text-black px-6 py-2 text-sm italic">VOLVER</button>
-            </div>
-            <div className="grid grid-cols-1 gap-8">
-              {adminData.map((session: any) => {
-                const totalAnswers = session.responses?.length || 0;
-                const correctCount = session.responses?.filter((r: any) => r.isCorrect).length || 0;
-                const incorrectCount = totalAnswers - correctCount;
-                const successRate = totalAnswers > 0 ? (correctCount / totalAnswers) * 100 : 0;
-                const failRate = totalAnswers > 0 ? ((incorrectCount / totalAnswers) * 100) : 0;
-                const getValuation = (score: number) => {
-                  if (score >= 90) return { label: 'SUPERIOR', color: 'bg-kart-green' };
-                  if (score >= 75) return { label: 'ALTO', color: 'bg-kart-blue' };
-                  if (score >= 60) return { label: 'BÁSICO', color: 'bg-kart-yellow text-slate-900 border-2 border-black font-bold' };
-                  return { label: 'BAJO', color: 'bg-kart-red' };
-                };
-                const val = getValuation(session.totalScore || 0);
+          <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-7xl mx-auto mt-10 space-y-8 pb-20">
+            {/* ADMIN HEADER */}
+            <div className="bg-white p-8 border-4 border-black shadow-[8px_8px_0px_#000] space-y-6">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-4xl font-display font-black italic uppercase text-kart-blue">Dashboard Docente</h2>
+                  <p className="font-tech text-xs text-slate-400 uppercase">Seguimiento de Aprendizaje MRU</p>
+                </div>
+                <button 
+                  onClick={() => setGameState('intro')} 
+                  className="kart-button bg-slate-800 text-white px-8 py-2 text-sm italic uppercase"
+                >
+                  SALIR DEL PANEL
+                </button>
+              </div>
 
-                return (
-                  <div key={session.id} className="p-6 bg-white border-4 border-black">
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                      <div className="lg:col-span-4 space-y-4">
-                        <div className="flex gap-4">
-                          <div className="w-20 h-20 bg-slate-100 border-2 border-black rounded-lg p-1 overflow-hidden">
-                            {(() => {
-                              const char = CHARACTERS.find(c => c.id === session.selectedCharId);
-                              return char ? <img src={char.image} className="w-full h-full object-contain" /> : <User className="text-slate-300" />;
-                            })()}
+              {/* QUICK STATS */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'SUPERIOR (90-100)', count: adminStats.superior, color: 'text-kart-green', bg: 'bg-kart-green/5' },
+                  { label: 'ALTO (75-89)', count: adminStats.alto, color: 'text-kart-blue', bg: 'bg-kart-blue/5' },
+                  { label: 'BÁSICO (60-74)', count: adminStats.basico, color: 'text-slate-700', bg: 'bg-kart-yellow/10' },
+                  { label: 'BAJO (0-59)', count: adminStats.bajo, color: 'text-kart-red', bg: 'bg-kart-red/5' },
+                ].map((s, i) => (
+                  <div key={i} className={cn("p-4 border-2 border-black rounded-lg text-center", s.bg)}>
+                    <p className="text-[10px] font-tech font-black uppercase opacity-60 mb-1">{s.label}</p>
+                    <p className={cn("text-3xl font-display font-black italic leading-none", s.color)}>{s.count}</p>
+                    <p className="text-[10px] font-tech uppercase mt-1">Estudiantes</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* FILTERS TOOLBAR */}
+              <div className="flex flex-col lg:flex-row gap-4 pt-4 border-t-2 border-slate-100">
+                <div className="flex-1 relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    type="text" 
+                    placeholder="Buscar por nombre..." 
+                    value={adminSearch}
+                    onChange={(e) => setAdminSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 border-2 border-black font-tech uppercase text-xs focus:ring-2 ring-kart-blue outline-none"
+                  />
+                </div>
+                
+                <div className="flex flex-wrap gap -2">
+                  <button 
+                    onClick={() => {
+                      const headers = ['Estudiante', 'Grado', 'Institucion', 'Puntaje', 'Coins', 'Aciertos', 'Total Misiones', 'Ultima Actividad'];
+                      const rows = filteredAdminData.map(s => [
+                        s.userName,
+                        s.userGrade,
+                        s.institution || 'N/A',
+                        `${s.totalScore}%`,
+                        s.coins || 0,
+                        s.responses?.filter((r: any) => r.isCorrect).length || 0,
+                        s.responses?.length || 0,
+                        s.lastActiveAt?.toDate().toLocaleString() || 'N/A'
+                      ]);
+                      const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+                      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                      const link = document.createElement("a");
+                      const url = URL.createObjectURL(blob);
+                      link.setAttribute("href", url);
+                      link.setAttribute("download", `mru_heroes_reporte_${new Date().toLocaleDateString()}.csv`);
+                      link.style.visibility = 'hidden';
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    className="p-3 border-2 border-dashed border-slate-300 font-tech text-[10px] uppercase hover:border-black flex items-center gap-2"
+                  >
+                    <Trophy size={14} /> Descargar Reporte CSV
+                  </button>
+
+                  <div className="relative group">
+                    <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
+                    <select 
+                      value={adminGradeFilter}
+                      onChange={(e) => setAdminGradeFilter(e.target.value)}
+                      className="pl-10 pr-8 py-3 border-2 border-black font-tech uppercase text-xs appearance-none bg-white cursor-pointer hover:bg-slate-50"
+                    >
+                      <option value="ALL">TODOS LOS GRADOS</option>
+                      {uniqueGrades.map(g => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="relative group">
+                    <TrendingUp className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
+                    <select 
+                      value={adminSortBy}
+                      onChange={(e) => setAdminSortBy(e.target.value as 'date' | 'score')}
+                      className="pl-10 pr-8 py-3 border-2 border-black font-tech uppercase text-xs appearance-none bg-white cursor-pointer hover:bg-slate-50"
+                    >
+                      <option value="date">RECIENTES PRIMERO</option>
+                      <option value="score">MEJOR PUNTAJE</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* RESULTS LIST */}
+            <div className="grid grid-cols-1 gap-6">
+              {filteredAdminData.length === 0 ? (
+                <div className="bg-white p-12 border-4 border-black text-center space-y-4">
+                  <ShieldAlert size={48} className="mx-auto text-slate-300" />
+                  <p className="font-display text-2xl italic text-slate-400 uppercase">Sin resultados para esta búsqueda</p>
+                </div>
+              ) : (
+                filteredAdminData.map((session: any) => {
+                  const totalAnswers = session.responses?.length || 0;
+                  const correctCount = session.responses?.filter((r: any) => r.isCorrect).length || 0;
+                  const incorrectCount = totalAnswers - correctCount;
+                  const successRate = totalAnswers > 0 ? (correctCount / totalAnswers) * 100 : 0;
+                  
+                  const getValuation = (score: number) => {
+                    if (score >= 90) return { label: 'SUPERIOR', color: 'bg-kart-green', text: 'text-kart-green' };
+                    if (score >= 75) return { label: 'ALTO', color: 'bg-kart-blue', text: 'text-kart-blue' };
+                    if (score >= 60) return { label: 'BÁSICO', color: 'bg-kart-yellow text-slate-900 border-2 border-black', text: 'text-slate-600' };
+                    return { label: 'BAJO', color: 'bg-kart-red', text: 'text-kart-red' };
+                  };
+                  const val = getValuation(session.totalScore || 0);
+
+                  return (
+                    <motion.div 
+                      key={session.id} 
+                      layout
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-white border-4 border-black overflow-hidden hover:shadow-[12px_12px_0px_#000] transition-shadow"
+                    >
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-0">
+                        {/* LEFT PANEL: Student Profile */}
+                        <div className="lg:col-span-4 p-6 border-b-4 lg:border-b-0 lg:border-r-4 border-black space-y-6">
+                          <div className="flex gap-4">
+                            <div className="w-20 h-20 bg-slate-100 border-2 border-black rounded-xl p-2 relative flex-shrink-0">
+                              {(() => {
+                                const char = CHARACTERS.find(c => c.id === session.selectedCharId);
+                                return char ? (
+                                  <img src={char.image} className="w-full h-full object-contain" alt={char.name} />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center bg-slate-200">
+                                    <User className="text-slate-400" />
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                            <div className="min-w-0">
+                              <h3 className="font-display font-black italic text-2xl text-black uppercase truncate leading-tight">
+                                {session.userName}
+                              </h3>
+                              <p className="font-tech text-[10px] text-slate-500 uppercase tracking-widest mt-1">
+                                {session.userGrade} | {session.institution || 'I.E Josefa Campos'}
+                              </p>
+                              <div className="mt-3 flex flex-wrap gap-2 items-center">
+                                <span className={cn("px-2 py-0.5 text-[10px] text-white italic font-black rounded", val.color)}>
+                                  {val.label}
+                                </span>
+                                <span className="font-display font-black italic text-kart-blue text-xl leading-none">
+                                  {session.totalScore}%
+                                </span>
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <p className="font-display font-black italic text-2xl text-kart-red uppercase">{session.userName}</p>
-                            <p className="font-tech text-xs text-slate-500 uppercase">{session.userGrade}</p>
-                            <div className="mt-2 flex gap-4 items-center">
-                              <span className={cn("px-3 py-1 text-xs text-white italic font-black", val.color)}>{val.label}</span>
-                              <span className="font-display font-black italic text-kart-blue">{session.totalScore}%</span>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-slate-50 p-3 border-2 border-black text-center">
+                              <p className="text-[10px] font-black font-tech text-slate-500 uppercase">Aciertos</p>
+                              <p className="text-2xl font-display font-black italic text-kart-green leading-none mt-1">
+                                {correctCount}
+                              </p>
+                              <p className="text-[10px] font-tech text-slate-400 uppercase mt-1">de {totalAnswers}</p>
+                            </div>
+                            <div className="bg-slate-50 p-3 border-2 border-black text-center">
+                              <p className="text-[10px] font-black font-tech text-slate-500 uppercase">Coins</p>
+                              <p className="text-2xl font-display font-black italic text-kart-yellow leading-none mt-1">
+                                {session.coins || 0}
+                              </p>
+                              <p className="text-[10px] font-tech text-slate-400 uppercase mt-1">Acumulados</p>
+                            </div>
+                          </div>
+
+                          <p className="text-[10px] font-tech text-slate-400 flex items-center gap-2 uppercase">
+                            <Clock size={12} /> Última actividad: {session.lastActiveAt?.toDate().toLocaleString() || 'N/A'}
+                          </p>
+                        </div>
+
+                        {/* RIGHT PANEL: Detailed Responses */}
+                        <div className="lg:col-span-8 p-6 flex flex-col">
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="font-display font-black italic text-xl uppercase italic text-slate-400">Desglose de Misiones</h4>
+                            <div className="text-[10px] font-tech text-slate-400 uppercase bg-slate-100 px-3 py-1 rounded-full">
+                              Efectividad: {successRate.toFixed(1)}%
+                            </div>
+                          </div>
+                          
+                          <div className="flex-1 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {session.responses && session.responses.length > 0 ? (
+                                session.responses.map((r: any, idx: number) => {
+                                  const challenge = CHALLENGES.find(c => c.id === r.challengeId);
+                                  return (
+                                    <div 
+                                      key={idx} 
+                                      className={cn(
+                                        "p-3 border-2 border-black flex gap-3 text-xs italic font-tech relative group",
+                                        r.isCorrect ? "bg-kart-green/5 border-kart-green/20" : "bg-kart-red/5 border-kart-red/20"
+                                      )}
+                                    >
+                                      <div className="mt-1">
+                                        {r.isCorrect 
+                                          ? <CheckCircle2 className="text-kart-green" size={16} /> 
+                                          : <XCircle className="text-kart-red" size={16} />
+                                        }
+                                      </div>
+                                      <div className="min-w-0 flex-1">
+                                        <p className="font-bold text-slate-700 leading-tight">
+                                          Mission #{r.challengeId}: {challenge?.question.slice(0, 50)}...
+                                        </p>
+                                        <div className="mt-2 flex justify-between items-end">
+                                          <p className="uppercase text-[9px] text-slate-400">
+                                            Tu R: <span className={cn("font-black", r.isCorrect ? "text-kart-green" : "text-kart-red")}>
+                                              {r.answer}
+                                            </span>
+                                          </p>
+                                          {!r.isCorrect && (
+                                            <p className="text-[8px] text-slate-400 italic">Correcta: {challenge?.correctAnswer}</p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <div className="col-span-full py-12 text-center border-2 border-dashed border-slate-200">
+                                  <Activity size={24} className="mx-auto text-slate-200 mb-2" />
+                                  <p className="text-[10px] font-tech uppercase text-slate-400">Sin respuestas aún</p>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="bg-kart-green/10 p-2 border border-kart-green rounded text-center">
-                            <p className="text-[10px] font-bold text-kart-green">ACIERTOS</p>
-                            <p className="text-xl font-black text-kart-green">{successRate.toFixed(0)}%</p>
-                          </div>
-                          <div className="bg-kart-red/10 p-2 border border-kart-red rounded text-center">
-                            <p className="text-[10px] font-bold text-kart-red">FALLOS</p>
-                            <p className="text-xl font-black text-kart-red">{failRate.toFixed(0)}%</p>
-                          </div>
-                        </div>
                       </div>
-                      <div className="lg:col-span-8">
-                         <p className="font-display font-black italic text-lg uppercase mb-4 border-b-2">Misiones</p>
-                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[250px] overflow-y-auto overflow-x-hidden pr-2">
-                           {session.responses?.map((r: any, idx: number) => {
-                             const ch = CHALLENGES.find(c => c.id === r.challengeId);
-                             return (
-                               <div key={idx} className={cn("p-2 border-2 border-black flex gap-3 text-xs italic font-tech", r.isCorrect ? "bg-kart-green/5 border-kart-green" : "bg-kart-red/5 border-kart-red")}>
-                                  {r.isCorrect ? <CheckCircle2 className="text-kart-green" size={16} /> : <XCircle className="text-kart-red" size={16} />}
-                                  <div>
-                                    <p className="font-bold">Misión #{r.challengeId}: {ch?.question.slice(0, 40)}...</p>
-                                    <p className="uppercase text-[10px]">Resp: <span className={r.isCorrect ? "text-kart-green" : "text-kart-red"}>{r.answer}</span></p>
-                                  </div>
-                               </div>
-                             );
-                           })}
-                         </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                    </motion.div>
+                  );
+                })
+              )}
             </div>
           </motion.div>
         )}
