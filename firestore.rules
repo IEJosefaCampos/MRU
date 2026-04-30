@@ -25,6 +25,7 @@ service cloud.firestore {
       allow read: if isSignedIn() && (isOwner(userId) || isAdmin());
       allow create: if isSignedIn() && isOwner(userId);
       allow update: if isSignedIn() && isOwner(userId);
+      allow delete: if isAdmin();
     }
 
     // Sessions collection
@@ -32,11 +33,13 @@ service cloud.firestore {
       allow create: if isSignedIn(); 
       allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
       
       // Responses subcollection
       match /responses/{responseId} {
         allow create: if isSignedIn(); 
         allow read: if isSignedIn() && (get(/databases/$(database)/documents/sessions/$(sessionId)).data.userId == request.auth.uid || isAdmin());
+        allow delete: if isAdmin();
       }
     }
   }

@@ -41,7 +41,8 @@ import {
   ShieldAlert,
   CheckCircle2,
   XCircle,
-  ArrowRight
+  ArrowRight,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
@@ -58,7 +59,8 @@ import {
   getDocs,
   getDoc,
   setDoc,
-  limit
+  limit,
+  deleteDoc
 } from 'firebase/firestore';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { 
@@ -371,6 +373,18 @@ export default function App() {
       });
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleDeleteSession = async (id: string, name: string) => {
+    if (!window.confirm(`¿Estás seguro de que deseas eliminar el registro de "${name}"? Esta acción no se puede deshacer.`)) return;
+    try {
+      await deleteDoc(doc(db, 'sessions', id));
+      // The onSnapshot in the admin section will automatically update the UI
+      playSound('click');
+    } catch (e) {
+      console.error("Error al eliminar sesión:", e);
+      alert("Error al intentar eliminar el registro.");
     }
   };
 
@@ -1093,9 +1107,18 @@ export default function App() {
                             </div>
                           </div>
 
-                          <p className="text-[10px] font-tech text-slate-400 flex items-center gap-2 uppercase">
-                            <Clock size={12} /> Última actividad: {session.lastActiveAt?.toDate().toLocaleString() || 'N/A'}
-                          </p>
+                          <div className="flex items-center justify-between">
+                            <p className="text-[10px] font-tech text-slate-400 flex items-center gap-2 uppercase">
+                              <Clock size={12} /> Última actividad: {session.lastActiveAt?.toDate().toLocaleString() || 'N/A'}
+                            </p>
+                            <button 
+                              onClick={() => handleDeleteSession(session.id, session.userName)}
+                              className="p-2 text-slate-300 hover:text-kart-red transition-colors"
+                              title="Eliminar Registro"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         </div>
 
                         {/* RIGHT PANEL: Detailed Responses */}
