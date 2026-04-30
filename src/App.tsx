@@ -382,9 +382,13 @@ export default function App() {
       await deleteDoc(doc(db, 'sessions', id));
       // The onSnapshot in the admin section will automatically update the UI
       playSound('click');
-    } catch (e) {
+    } catch (e: any) {
       console.error("Error al eliminar sesión:", e);
-      alert("Error al intentar eliminar el registro.");
+      if (e.code === 'permission-denied') {
+        alert("Permiso denegado. Asegúrate de estar usando el correo de administrador.");
+      } else {
+        alert(`Error al intentar eliminar el registro: ${e.message || 'Error desconocido'}`);
+      }
     }
   };
 

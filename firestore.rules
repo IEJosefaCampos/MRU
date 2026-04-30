@@ -13,7 +13,7 @@ service cloud.firestore {
     
     // Admin check: Only the project owner/specified user email
     function isAdmin() { 
-      return isSignedIn() && (request.auth.token.email == 'iejosefacampos2025@gmail.com' && request.auth.token.email_verified == true);
+      return isSignedIn() && request.auth.token.email == 'iejosefacampos2025@gmail.com';
     }
 
     function isOwner(userId) {
