@@ -209,113 +209,51 @@ export default function App() {
   }, [adminData]);
 
   // Auth form states
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('josefa2026*');
   const [authError, setAuthError] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
-
-  // Admin: Student Registration states
-  const [newStudentEmail, setNewStudentEmail] = useState('');
-  const [newStudentPassword, setNewStudentPassword] = useState('josefa2026*');
-  const [newStudentName, setNewStudentName] = useState('');
-  const [newStudentGrade, setNewStudentGrade] = useState('10°');
-  const [isRegisteringStudent, setIsRegisteringStudent] = useState(false);
-  const [registerMessage, setRegisterMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
-
-  // Helper to suggest username when name is typed
-  const handleNameChange = (name: string) => {
-    setNewStudentName(name);
-    if (!newStudentEmail) { // Only suggest if email/user field is empty
-      const parts = name.trim().split(' ');
-      if (parts.length >= 2) {
-        // format: first_surname.first_name
-        // Based on "AGUAS HERNANDEZ XIOMI" -> aguas.xiomi
-        // Usually, the first part is the surname for these lists
-        const suggested = `${parts[0]}.${parts[parts.length-1]}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        setNewStudentEmail(suggested);
-      }
-    }
-  };
-
-  const handleAdminRegisterStudent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsRegisteringStudent(true);
-    setRegisterMessage(null);
-    
-    let secondaryApp = null;
-    try {
-      // Auto-generate username/email from name if student email is a username
-      const studentEmail = newStudentEmail.includes('@') 
-        ? newStudentEmail 
-        : `${newStudentEmail.toLowerCase().trim()}@josefacampos.edu`;
-
-      const secondaryAppName = `temp-register-${Date.now()}`;
-      secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
-      const secondaryAuth = getAuth(secondaryApp);
-      
-      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, studentEmail, newStudentPassword);
-      const newUser = userCredential.user;
-      
-      await setDoc(doc(db, 'users', newUser.uid), {
-        fullName: newStudentName,
-        username: newStudentEmail.toLowerCase().trim(),
-        email: studentEmail,
-        grade: newStudentGrade,
-        institution: 'I.E Josefa Campos',
-        createdAt: serverTimestamp()
-      });
-      
-      // Log out from secondary session so it doesn't persist
-      await secondaryAuth.signOut();
-      
-      setRegisterMessage({ text: `Estudiante ${newStudentName} registrado con éxito.`, type: 'success' });
-      setNewStudentEmail('');
-      setNewStudentPassword('');
-      setNewStudentName('');
-      setNewStudentGrade('');
-      playSound('correct');
-    } catch (err: any) {
-      console.error("Error al registrar estudiante:", err);
-      setRegisterMessage({ text: `Error: ${err.message}`, type: 'error' });
-      playSound('incorrect');
-    } finally {
-      setIsRegisteringStudent(false);
-      if (secondaryApp) {
-        await deleteApp(secondaryApp);
-      }
-    }
-  };
+  const [isGuest, setIsGuest] = useState(false);
 
   useEffect(() => {
     return onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        // Fetch user profile
+        // Fetch or create user profile
         const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (userDoc.exists()) {
-          const profile = userDoc.data();
-          setUserProfile(profile);
-          setUserName(profile.fullName);
-          setUserGrade(profile.grade);
-          
-          // Try to resume session
-          const q = query(
-            collection(db, 'sessions'), 
-            where('userId', '==', user.uid),
-            orderBy('lastActiveAt', 'desc'),
-            limit(1)
-          );
-          const sessionSnap = await getDocs(q);
-          if (!sessionSnap.empty) {
-            const lastSession = sessionSnap.docs[0];
-            const data = lastSession.data();
-            setSessionId(lastSession.id);
-            setCoins(data.coins || 0);
-            setCurrentChallengeIdx(data.challengesCompleted || 0);
-            if (data.selectedCharId) {
-              const char = CHARACTERS.find(c => c.id === data.selectedCharId);
-              if (char) setSelectedChar(char);
-            }
+        let profile = userDoc.exists() ? userDoc.data() : null;
+        
+        if (!profile) {
+          // Auto-create basic profile for Google users
+          profile = {
+            fullName: user.displayName || user.email?.split('@')[0] || 'PILOTO',
+            email: user.email,
+            grade: 'INVITADO',
+            institution: 'COLEGIO GOOGLE',
+            createdAt: serverTimestamp()
+          };
+          await setDoc(doc(db, 'users', user.uid), profile);
+        }
+
+        setUserProfile(profile);
+        setUserName(profile.fullName);
+        setUserGrade(profile.grade);
+        
+        // Try to resume session
+        const q = query(
+          collection(db, 'sessions'), 
+          where('userId', '==', user.uid),
+          orderBy('lastActiveAt', 'desc'),
+          limit(1)
+        );
+        const sessionSnap = await getDocs(q);
+        if (!sessionSnap.empty) {
+          const lastSession = sessionSnap.docs[0];
+          const data = lastSession.data();
+          setSessionId(lastSession.id);
+          setCoins(data.coins || 0);
+          setCurrentChallengeIdx(data.challengesCompleted || 0);
+          if (data.selectedCharId) {
+            const char = CHARACTERS.find(c => c.id === data.selectedCharId);
+            if (char) setSelectedChar(char);
           }
         }
       } else {
@@ -350,6 +288,10 @@ export default function App() {
   }, [gameState, currentUser]);
 
   const startSession = async () => {
+    if (isGuest) {
+      setSessionId('guest-session-' + Date.now());
+      return;
+    }
     try {
       const docRef = await addDoc(collection(db, 'sessions'), {
         userId: currentUser?.uid || null,
@@ -368,29 +310,12 @@ export default function App() {
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError('');
-    setIsAuthLoading(true);
-    try {
-      // If it doesn't contain @, it's a student username
-      const loginEmail = username.includes('@') ? username : `${username.toLowerCase().trim()}@josefacampos.edu`;
-      await signInWithEmailAndPassword(auth, loginEmail, password);
-      setGameState('character_selection');
-      playSound('click');
-    } catch (err: any) {
-      console.error("Login error:", err);
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setAuthError('Usuario o contraseña incorrectos');
-      } else {
-        setAuthError('Error al entrar. Revisa tus datos.');
-      }
-    } finally {
-      setIsAuthLoading(false);
-    }
-  };
-
   const handleLogout = async () => {
+    if (isGuest) {
+      setIsGuest(false);
+      setGameState('intro');
+      return;
+    }
     await signOut(auth);
     setGameState('intro');
   };
@@ -410,7 +335,7 @@ export default function App() {
   };
 
   const updateSession = async (newCoins: number, correct: boolean, studentAnswer: string) => {
-    if (!sessionId) return;
+    if (isGuest || !sessionId) return;
     try {
       const sessionRef = doc(db, 'sessions', sessionId);
       await updateDoc(sessionRef, {
@@ -603,12 +528,38 @@ export default function App() {
             {!currentUser ? (
               <div className="flex flex-col gap-4">
                 <button 
-                  onClick={() => { setGameState('login'); playSound('click'); }} 
+                  onClick={async () => {
+                    try {
+                      const user = await signInWithGoogle();
+                      if (user) {
+                        setGameState('character_selection');
+                        playSound('click');
+                      }
+                    } catch (err: any) {
+                      if (err.code === 'auth/operation-not-allowed') {
+                        alert('ERROR: El proveedor de Google no está habilitado en la consola de Firebase.');
+                      } else {
+                        alert('Error con Google: ' + err.message);
+                      }
+                    }
+                  }} 
                   className="kart-button bg-kart-blue text-white py-6 text-2xl flex items-center justify-center gap-3 w-full"
                 >
-                  <LogIn size={28} /> INICIAR SESIÓN
+                  <LogIn size={28} /> ENTRAR CON GOOGLE
                 </button>
-                <p className="font-tech text-[10px] text-slate-400 uppercase">Debes tener una cuenta creada por el docente para ingresar</p>
+
+                <button 
+                  onClick={() => { 
+                    setIsGuest(true); 
+                    setGameState('character_selection'); 
+                    playSound('click'); 
+                  }} 
+                  className="kart-button bg-white text-black py-4 text-xl flex items-center justify-center gap-2 border-4 border-black"
+                >
+                  ENTRAR COMO INVITADO
+                </button>
+                
+                <p className="font-tech text-[10px] text-slate-400 uppercase text-center">Usa tu cuenta personal para guardar tu progreso</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -627,63 +578,6 @@ export default function App() {
                 </button>
               </div>
             )}
-          </motion.div>
-        )}
-
-        {/* LOGIN SCREEN */}
-        {gameState === 'login' && (
-          <motion.div 
-            key="login" 
-            initial={{ opacity: 0, x: -100 }} 
-            animate={{ opacity: 1, x: 0 }} 
-            exit={{ opacity: 0, x: 100 }}
-            className="max-w-md mx-auto mt-20 p-10 bg-white border-4 border-black shadow-[10px_10px_0px_#000] space-y-6"
-          >
-            <h2 className="text-4xl font-display font-black italic uppercase text-kart-blue">ACCESO AL HANGAR</h2>
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-[10px] font-tech font-black uppercase text-slate-500">Usuario</label>
-                <input 
-                  required 
-                  value={username} 
-                  onChange={e => setUsername(e.target.value)} 
-                  className="w-full p-4 border-2 border-black font-tech text-lg" 
-                  placeholder="ej: aguas.xiomi"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-tech font-black uppercase text-slate-500">Contraseña</label>
-                <input required type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-4 border-2 border-black font-tech text-lg" />
-              </div>
-              {authError && <p className="text-kart-red font-tech text-xs bg-kart-red/10 p-2 border border-kart-red uppercase">{authError}</p>}
-              <div className="pt-4 flex flex-col gap-4">
-                <button disabled={isAuthLoading} type="submit" onClick={() => playSound('click')} className="kart-button bg-kart-blue text-white py-4 text-xl">
-                  {isAuthLoading ? 'ENTRANDO...' : 'INICIAR SESIÓN'}
-                </button>
-                
-                <div className="relative py-2">
-                  <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-slate-200"></span></div>
-                  <div className="relative flex justify-center text-[10px] uppercase font-tech"><span className="bg-white px-2 text-slate-400">O ingresa con</span></div>
-                </div>
-
-                <button 
-                  type="button"
-                  onClick={async () => {
-                    const user = await signInWithGoogle();
-                    if (user) {
-                      setGameState('character_selection');
-                      playSound('click');
-                    }
-                  }}
-                  className="kart-button bg-white text-black py-3 text-sm flex items-center justify-center gap-2 border-2 border-black"
-                >
-                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4" alt="Google" />
-                  GOOGLE
-                </button>
-                
-                <button onClick={() => { setGameState('intro'); playSound('click'); }} type="button" className="text-slate-400 font-tech text-xs uppercase font-bold text-center">Volver</button>
-              </div>
-            </form>
           </motion.div>
         )}
 
@@ -768,10 +662,29 @@ export default function App() {
                     <div style={{ minWidth: '1200px', height: '400px', backgroundImage: 'url(https://i.postimg.cc/7L1LQmcn/background1.png)' }} />
                   </motion.div>
                   <img src={selectedChar?.image} className="absolute bottom-10 left-10 w-24 z-10" />
-                  <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-black text-white p-2 font-tech">T: {simTime.toFixed(1)}s | D: {(simTime * effV).toFixed(1)}m</div>
-                  <div className="absolute left-10 bottom-10 flex gap-4">
-                    <button onClick={() => { setIsRunning(!isRunning); playSound('click'); }} className="bg-kart-green p-4 border-4 border-black">{isRunning ? <Pause /> : <Play />}</button>
-                    <button onClick={() => { setSimTime(0); setIsRunning(false); playSound('click'); }} className="bg-kart-red p-4 border-4 border-black"><RotateCcw /></button>
+                  <div className="absolute top-4 left-4 z-10 flex gap-4">
+                    <button 
+                      onClick={() => { setIsRunning(!isRunning); playSound('click'); }} 
+                      className="bg-kart-green p-4 border-4 border-black hover:bg-emerald-400 transition-colors shadow-lg"
+                    >
+                      {isRunning ? <Pause /> : <Play />}
+                    </button>
+                    <button 
+                      onClick={() => { setSimTime(0); setIsRunning(false); playSound('click'); }} 
+                      className="bg-kart-red p-4 border-4 border-black hover:bg-rose-400 transition-colors shadow-lg"
+                    >
+                      <RotateCcw />
+                    </button>
+                  </div>
+                  <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-sm text-white p-3 border-2 border-white/20 font-tech flex gap-6">
+                    <div>
+                      <p className="text-[8px] uppercase text-slate-400">Tiempo</p>
+                      <p className="text-xl font-bold">{simTime.toFixed(1)}s</p>
+                    </div>
+                    <div className="border-l border-white/20 pl-6">
+                      <p className="text-[8px] uppercase text-slate-400">Distancia</p>
+                      <p className="text-xl font-bold">{(simTime * effV).toFixed(1)}m</p>
+                    </div>
                   </div>
                </div>
             </section>
@@ -960,80 +873,6 @@ export default function App() {
                     <p className="text-[10px] font-tech uppercase mt-1">Estudiantes</p>
                   </div>
                 ))}
-              </div>
-
-              {/* STUDENT REGISTRATION TOOL */}
-              <div className="bg-slate-50 border-2 border-black p-6 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-kart-green" />
-                <div className="flex items-center gap-3 mb-6">
-                  <UserPlus size={24} className="text-kart-green" />
-                  <div>
-                    <h3 className="font-display font-black italic text-xl uppercase text-black">Registrar Nuevo Estudiante</h3>
-                    <p className="font-tech text-[10px] text-slate-400 uppercase">Crea cuentas para tus alumnos manualmente</p>
-                  </div>
-                </div>
-
-                <form onSubmit={handleAdminRegisterStudent} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-tech font-black uppercase text-slate-400">Nombre Completo</label>
-                    <input 
-                      required 
-                      value={newStudentName} 
-                      onChange={e => handleNameChange(e.target.value)}
-                      className="w-full p-2 border-2 border-black font-tech text-xs" 
-                      placeholder="Ej: AGUAS XIOMI"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-tech font-black uppercase text-slate-400">Grado</label>
-                    <input 
-                      required 
-                      value={newStudentGrade} 
-                      onChange={e => setNewStudentGrade(e.target.value)}
-                      className="w-full p-2 border-2 border-black font-tech text-xs" 
-                      placeholder="Ej: 10°A"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-tech font-black uppercase text-slate-400">Usuario Sugerido</label>
-                    <input 
-                      required 
-                      value={newStudentEmail} 
-                      onChange={e => setNewStudentEmail(e.target.value)}
-                      className="w-full p-2 border-2 border-black font-tech text-xs" 
-                      placeholder="ej: aguas.xiomi"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-tech font-black uppercase text-slate-400">Contraseña</label>
-                    <div className="flex gap-2">
-                      <input 
-                        required 
-                        type="password"
-                        value={newStudentPassword} 
-                        onChange={e => setNewStudentPassword(e.target.value)}
-                        className="w-full p-2 border-2 border-black font-tech text-xs" 
-                        placeholder="******"
-                      />
-                      <button 
-                        disabled={isRegisteringStudent}
-                        type="submit" 
-                        className="kart-button bg-kart-green text-white px-4 py-2 text-xs flex-shrink-0"
-                      >
-                        {isRegisteringStudent ? '...' : <UserPlus size={16} />}
-                      </button>
-                    </div>
-                  </div>
-                </form>
-
-                {registerMessage && (
-                  <div className={cn(
-                    "mt-4 p-2 text-[10px] font-tech border uppercase",
-                    registerMessage.type === 'success' ? "bg-kart-green/10 border-kart-green text-kart-green" : "bg-kart-red/10 border-kart-red text-kart-red"
-                  )}>
-                    {registerMessage.text}
-                  </div>
-                )}
               </div>
 
               {/* FILTERS TOOLBAR */}
