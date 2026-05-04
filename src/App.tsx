@@ -43,10 +43,16 @@ import {
   XCircle,
   ArrowRight,
   Trash2,
-  UserPlus
+  UserX,
+  UserPlus,
+  Loader2,
+  BookOpen,
+  Rocket
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
+import 'katex/dist/katex.min.css';
+import { InlineMath } from 'react-katex';
 import { 
   collection, 
   addDoc, 
@@ -61,9 +67,16 @@ import {
   getDoc,
   setDoc,
   limit,
-  deleteDoc
+  deleteDoc,
+  writeBatch,
+  increment
 } from 'firebase/firestore';
-import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { 
+  onAuthStateChanged, 
+  User as FirebaseUser,
+  getAuth,
+  createUserWithEmailAndPassword
+} from 'firebase/auth';
 import { 
   db, 
   auth, 
@@ -72,81 +85,181 @@ import {
   signOut,
   firebaseConfig 
 } from './lib/firebase';
-import { initializeApp, deleteApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
+import { initializeApp } from 'firebase/app';
 import { cn } from './lib/utils';
 import { LogOut, LogIn } from 'lucide-react';
 
-type Mode = 'distance' | 'time' | 'velocity' | 'meeting';
-type GameState = 'intro' | 'auth' | 'login' | 'character_selection' | 'playing' | 'results' | 'admin';
+type Mode = 'distance' | 'time' | 'velocity' | 'meeting' | 'overtaking';
+type GameState = 'intro' | 'auth' | 'login' | 'grade_selection' | 'character_selection' | 'main_menu' | 'concepts' | 'formulas' | 'guided_examples' | 'challenges' | 'playing' | 'results' | 'admin';
 
-interface Character {
+interface Concept {
   id: string;
-  name: string;
-  image: string;
+  title: string;
+  definition: string;
+  icon: React.ReactNode;
   color: string;
-  personality: string;
-  motto?: string;
+  formula?: string;
 }
 
-const CHARACTERS: Character[] = [
-  { 
-    id: 'vector', 
-    name: 'VECTOR "EL VELOZ"', 
-    image: 'https://i.postimg.cc/cHsJqfy5/Vector2.png', 
-    color: '#e60012',
-    personality: 'Directo y enfocado.',
-    motto: '"La distancia más corta entre dos puntos es mi trayectoria"'
-  },
-  { 
-    id: 'inercia', 
-    name: 'INERCIA "LA IMPARABLE"', 
-    image: 'https://i.postimg.cc/zBJfmTZ7/inercia2.png', 
-    color: '#43b02a',
-    personality: 'Una vez que arranca, nadie la detiene. Es relajada pero persistente.'
-  },
-  { 
-    id: 'cronos', 
-    name: 'CRONOS "EL PRECISO"', 
-    image: 'https://i.postimg.cc/Dz3ZgtCm/cronos2.png', 
-    color: '#0072ce',
-    personality: 'Obsesionado con la exactitud. Calcula cada milisegundo de la carrera.'
-  },
-  { 
-    id: 'magno', 
-    name: 'MAGNO "EL MASA"', 
-    image: 'https://i.postimg.cc/50xtc8dR/magno2.png', 
-    color: '#f9d71c',
-    personality: 'Rudo pero bonachón. Su fuerza le permite mantener una velocidad constante sin desviarse por obstáculos menores.'
-  },
+const CONCEPTS: Concept[] = [
+  { id: 'posicion', title: 'Posición', definition: 'Lugar exacto en el espacio donde se encuentra un cuerpo respecto a un sistema de referencia.', icon: <Settings2 />, color: '#0072ce', formula: 'x = x_0 + v \\cdot t' },
+  { id: 'trayectoria', title: 'Trayectoria', definition: 'Línea imaginaria que describe un móvil durante su movimiento.', icon: <Activity />, color: '#43b02a' },
+  { id: 'distancia', title: 'Distancia Recorrida', definition: 'Longitud de la trayectoria. Es una magnitud escalar (siempre positiva).', icon: <MoveRight />, color: '#e60012', formula: 'd = v \\cdot t' },
+  { id: 'desplazamiento', title: 'Desplazamiento', definition: 'Cambio de posición. Es un vector que une el punto inicial con el final.', icon: <ArrowRight />, color: '#f9d71c', formula: '\\Delta x = x_f - x_i' },
+  { id: 'rapidez', title: 'Rapidez', definition: 'Relación entre la distancia recorrida y el tiempo empleado. Es una magnitud escalar (siempre positiva).', icon: <Zap />, color: '#e60012', formula: 'v = \\frac{d}{t}' },
+  { id: 'velocidad', title: 'Velocidad', definition: 'Relación entre el desplazamiento y el tiempo empleado. Es una magnitud vectorial (incluye dirección).', icon: <Flame />, color: '#43b02a', formula: '\\vec{v} = \\frac{\\Delta x}{t}' },
+  { id: 'aceleracion', title: 'Aceleración', definition: 'Variación de la velocidad en la unidad de tiempo.', icon: <TrendingUp />, color: '#0072ce', formula: 'a = \\frac{v_f - v_i}{t}' },
+];
+
+interface Formula {
+  concept: string;
+  formula: string;
+  unit: string;
+}
+
+const FORMULAS: Formula[] = [
+  { concept: 'Desplazamiento (Δx)', formula: '\\Delta x = x_f - x_i', unit: 'm (metros)' },
+  { concept: 'Posición (x)', formula: 'x = x_0 + v \\cdot t', unit: 'm (metros)' },
+  { concept: 'Distancia (d)', formula: 'd = v \\cdot t', unit: 'm (metros)' },
+  { concept: 'Rapidez (v)', formula: 'v = \\frac{d}{t}', unit: 'm/s' },
+  { concept: 'Velocidad (v)', formula: '\\vec{v} = \\frac{\\Delta x}{t}', unit: 'm/s' },
+  { concept: 'Tiempo (t)', formula: 't = \\frac{d}{v}', unit: 's (segundos)' },
+  { concept: 'Tiempo de Encuentro', formula: 't_e = \\frac{d}{v_1 + v_2}', unit: 's' },
+  { concept: 'Tiempo de Alcance', formula: 't_a = \\frac{d}{v_1 - v_2}', unit: 's' },
+  { concept: 'Aceleración (a)', formula: 'a = \\frac{v_f - v_i}{t}', unit: 'm/s^2' },
 ];
 
 interface Challenge {
   id: number;
   mode: Mode;
+  narrative: string;
   question: string;
   options: string[];
   correctAnswer: string;
   hint: string;
   reward: number;
+  xp: number;
+  initialValues: { v?: number; t?: number; d?: number; v2?: number; dTotal?: number; isChase?: boolean };
 }
 
-const CHALLENGES: Challenge[] = [
-  { id: 1, mode: 'distance', question: "Magno escapa a 40 m/s. Si tarda 5s en llegar a su base, ¿a qué distancia está?", options: ["150m", "200m", "250m", "300m"], correctAnswer: "200m", hint: "d = v * t", reward: 50 },
-  { id: 2, mode: 'distance', question: "Un rayo láser viaja a 60 m/s durante 3s. ¿Qué distancia recorre?", options: ["120m", "150m", "180m", "200m"], correctAnswer: "180m", hint: "d = v * t", reward: 50 },
-  { id: 3, mode: 'distance', question: "Vector usa su propulsor y va a 80 m/s por 4s. ¿Cuántos metros avanzó?", options: ["240m", "320m", "400m", "480m"], correctAnswer: "320m", hint: "d = v * t", reward: 50 },
-  { id: 4, mode: 'velocity', question: "Recorres 600m en 15s. ¿A qué velocidad constante vas?", options: ["30 m/s", "35 m/s", "40 m/s", "50 m/s"], correctAnswer: "40 m/s", hint: "v = d / t", reward: 50 },
-  { id: 5, mode: 'velocity', question: "Un destello recorre 1000m en 10s. ¿Cuál es su velocidad?", options: ["80 m/s", "90 m/s", "100 m/s", "110 m/s"], correctAnswer: "100 m/s", hint: "v = d / t", reward: 50 },
-  { id: 6, mode: 'velocity', question: "Inercia recorre 450m en 9s. ¿A qué velocidad se mueve?", options: ["40 m/s", "45 m/s", "50 m/s", "55 m/s"], correctAnswer: "50 m/s", hint: "v = d / t", reward: 50 },
-  { id: 7, mode: 'time', question: "La meta está a 1000m. Si vas a 50 m/s, ¿cuánto tiempo tardarás?", options: ["10s", "15s", "20s", "25s"], correctAnswer: "20s", hint: "t = d / v", reward: 50 },
-  { id: 8, mode: 'time', question: "Cronos debe recorrer 1200m a 40 m/s. ¿En cuánto tiempo llega?", options: ["20s", "25s", "30s", "35s"], correctAnswer: "30s", hint: "t = d / v", reward: 50 },
-  { id: 9, mode: 'time', question: "Una alarma sonará en 5s. Si estás a 250m, ¿a qué velocidad mínima debes huir?", options: ["40 m/s", "45 m/s", "50 m/s", "60 m/s"], correctAnswer: "50 m/s", hint: "v = d / t", reward: 50 },
-  { id: 10, mode: 'meeting', question: "Vector (0m, 30m/s) y Magno (1000m, 20m/s) van al encuentro. ¿En qué tiempo se cruzan?", options: ["10s", "15s", "20s", "25s"], correctAnswer: "20s", hint: "t = D / (v1 + v2)", reward: 100 },
-  { id: 11, mode: 'meeting', question: "En el encuentro anterior (t=20s, v1=30m/s), ¿a qué distancia desde el inicio de Vector se cruzan?", options: ["400m", "500m", "600m", "700m"], correctAnswer: "600m", hint: "d = v1 * t", reward: 100 },
-  { id: 12, mode: 'meeting', question: "Vector (0m, 50m/s) persigue a Magno (200m, 30m/s). ¿Cuánto tiempo tarda en alcanzarlo?", options: ["5s", "10s", "15s", "20s"], correctAnswer: "10s", hint: "t = d_separacion / (v_rapido - v_lento)", reward: 100 },
+const GUIDED_EXAMPLES: Challenge[] = [
+  { 
+    id: 1, 
+    mode: 'velocity', 
+    narrative: "Tu personaje necesita recorrer 100m para entregar un mensaje urgente y debe llegar a la meta en exactamente 2 segundos.",
+    question: "¿Cual será su velocidad necesaria?", 
+    options: ["25 m/s", "50 m/s", "75 m/s", "100 m/s"], 
+    correctAnswer: "50 m/s", 
+    hint: "v = \\frac{d}{t}", 
+    reward: 100,
+    xp: 20,
+    initialValues: { d: 100, t: 2 }
+  },
+  { 
+    id: 2, 
+    mode: 'distance', 
+    narrative: "Una patrulla espacial viaja a 30 m/s durante 5 segundos patrullando el sector Josefa.",
+    question: "¿Qué distancia logró recorrer?", 
+    options: ["100m", "150m", "200m", "250m"], 
+    correctAnswer: "150m", 
+    hint: "d = v \\cdot t", 
+    reward: 100,
+    xp: 20,
+    initialValues: { v: 30, t: 5 }
+  },
+  { 
+    id: 3, 
+    mode: 'time', 
+    narrative: "Cronos detecta un portal a 240 m de distancia. Su velocidad máxima es de 40 m/s.",
+    question: "¿En cuántos segundos llegará al portal?", 
+    options: ["4s", "5s", "6s", "8s"], 
+    correctAnswer: "6s", 
+    hint: "t = \\frac{d}{v}", 
+    reward: 100,
+    xp: 20,
+    initialValues: { d: 240, v: 40 }
+  },
+  { 
+    id: 4, 
+    mode: 'meeting', 
+    narrative: "Dos pilotos, Vector (v₁=30 m/s) y Magno (v₂=20 m/s), se encuentran en extremos opuestos de una pista de 1500m y avanzan uno hacia el otro.",
+    question: "¿En cuánto tiempo se encontrarán?", 
+    options: ["20s", "30s", "40s", "50s"], 
+    correctAnswer: "30s", 
+    hint: "t_e = \\frac{D}{v_1 + v_2}", 
+    reward: 150,
+    xp: 30,
+    initialValues: { dTotal: 1500, v: 30, v2: 20, isChase: false }
+  },
+  { 
+    id: 5, 
+    mode: 'meeting', 
+    narrative: "Inercia persigue a un infractor. Ella va a 50 m/s y el infractor a 30 m/s. La distancia que los separa es de 200m.",
+    question: "¿En cuánto tiempo logrará alcanzarlo?", 
+    options: ["5s", "10s", "15s", "20s"], 
+    correctAnswer: "10s", 
+    hint: "t_a = \\frac{d_{separación}}{v_{rápido} - v_{lento}}", 
+    reward: 150,
+    xp: 30,
+    initialValues: { dTotal: 200, v: 50, v2: 30, isChase: true }
+  },
 ];
 
-export default function App() {
+const CHALLENGES: Challenge[] = [
+  { id: 1, mode: 'distance', narrative: "Misión 1: Escapa de la zona roja.", question: "Magno va a 40 m/s por 5s. ¿Distancia?", options: ["150m", "200m", "250m", "300m"], correctAnswer: "200m", hint: "d = v \\cdot t", reward: 200, xp: 50, initialValues: { v: 40, t: 5 } },
+  { id: 2, mode: 'velocity', narrative: "Misión 2: Ajuste de propulsores.", question: "Recorres 600m en 15s. ¿Velocidad?", options: ["30 m/s", "40 m/s", "50 m/s", "60 m/s"], correctAnswer: "40 m/s", hint: "v = \\frac{d}{t}", reward: 200, xp: 50, initialValues: { d: 600, t: 15 } },
+  { id: 3, mode: 'time', narrative: "Misión 3: Tiempo límite.", question: "Meta a 1000m, vas a 50 m/s. ¿Tiempo?", options: ["10s", "20s", "30s", "40s"], correctAnswer: "20s", hint: "t = \\frac{d}{v}", reward: 200, xp: 50, initialValues: { d: 1000, v: 50 } },
+  { id: 4, mode: 'meeting', narrative: "Misión 4: Intersección.", question: "v1=30, v2=20, Distancia=1000m. ¿Tiempo encuentro?", options: ["10s", "20s", "25s", "30s"], correctAnswer: "20s", hint: "t_e = \\frac{D}{v_1 + v_2}", reward: 300, xp: 75, initialValues: { dTotal: 1000, v: 30, v2: 20, isChase: false } },
+  { id: 5, mode: 'meeting', narrative: "Misión 5: Persecución.", question: "v1=50, v2=30, Distancia=400m. ¿Tiempo alcance?", options: ["10s", "15s", "20s", "25s"], correctAnswer: "20s", hint: "t_a = \\frac{d}{v_1 - v_2}", reward: 300, xp: 75, initialValues: { dTotal: 400, v: 50, v2: 30, isChase: true } },
+  { id: 6, mode: 'distance', narrative: "Misión 6: Exploración profunda.", question: "v=15 m/s, t=40s. ¿Distancia?", options: ["400m", "500m", "600m", "700m"], correctAnswer: "600m", hint: "d = v \\cdot t", reward: 200, xp: 50, initialValues: { v: 15, t: 40 } },
+  { id: 7, mode: 'velocity', narrative: "Misión 7: Rompe la barrera.", question: "d=2000m, t=50s. ¿Velocidad?", options: ["30 m/s", "40 m/s", "50 m/s", "60 m/s"], correctAnswer: "40 m/s", hint: "v = \\frac{d}{t}", reward: 200, xp: 50, initialValues: { d: 2000, t: 50 } },
+  { id: 8, mode: 'time', narrative: "Misión 8: Retorno seguro.", question: "d=3000m, v=100 m/s. ¿Tiempo?", options: ["20s", "30s", "40s", "50s"], correctAnswer: "30s", hint: "t = \\frac{d}{v}", reward: 200, xp: 50, initialValues: { d: 3000, v: 100 } },
+  { id: 9, mode: 'meeting', narrative: "Misión 9: Maniobra de acople.", question: "v1=60, v2=40, D=500m. ¿Tiempo encuentro?", options: ["5s", "10s", "15s", "20s"], correctAnswer: "5s", hint: "t_e = \\frac{D}{v_1 + v_2}", reward: 350, xp: 100, initialValues: { dTotal: 500, v: 60, v2: 40, isChase: false } },
+  { id: 10, mode: 'meeting', narrative: "Misión 10: Alcance final.", question: "v1=80, v2=40, D=800m. ¿Tiempo alcance?", options: ["10s", "15s", "20s", "25s"], correctAnswer: "20s", hint: "t_a = \\frac{d}{v_1 - v_2}", reward: 400, xp: 150, initialValues: { dTotal: 800, v: 80, v2: 40, isChase: true } },
+];
+interface Character {
+  id: string;
+  name: string;
+  image: string;
+  color: string;
+  description: string;
+}
+
+const CHARACTERS: Character[] = [
+  { 
+    id: 'vector', 
+    name: 'VECTOR', 
+    image: '/vector2.png', 
+    color: 'text-kart-red',
+    description: 'Directo y enfocado. La distancia más corta es su meta.'
+  },
+  { 
+    id: 'inercia', 
+    name: 'INERCIA', 
+    image: '/inercia2.png', 
+    color: 'text-kart-green',
+    description: 'Relajado pero persistente. Nadie la detiene.'
+  },
+  { 
+    id: 'cronos', 
+    name: 'CRONOS', 
+    image: '/cronos2.png', 
+    color: 'text-kart-blue',
+    description: 'Obsesionado con la exactitud de cada milisegundo.'
+  },
+  { 
+    id: 'magno', 
+    name: 'MAGNO', 
+    image: '/magno2.png', 
+    color: 'text-kart-yellow',
+    description: 'Rudo y constante. Mantiene su ritmo pase lo que pase.'
+  }
+];
+
+const GRADES = ['10°1', '10°2', '10°3', '11°1', '11°2', '11°3', 'DOCENTE', 'OTRO'];
+
+
+const App = () => {
   const [gameState, setGameState] = useState<GameState>('intro');
   const [isPracticeMode, setIsPracticeMode] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -169,6 +282,53 @@ export default function App() {
   const [adminSearch, setAdminSearch] = useState('');
   const [adminGradeFilter, setAdminGradeFilter] = useState('ALL');
   const [adminSortBy, setAdminSortBy] = useState<'date' | 'score'>('date');
+  const [guestStats, setGuestStats] = useState<any>(null);
+
+  const deleteUser = async (studentId: string, studentName: string) => {
+    if (!studentId) {
+      alert("Error: No se pudo identificar el ID del estudiante.");
+      return;
+    }
+
+    const confirmMsg = `¡ALERTA DE SEGURIDAD!\n\n¿Estás seguro de que deseas eliminar permanentemente a "${studentName.toUpperCase()}"?\n\nEsta acción:\n1. Borrará su perfil de usuario.\n2. Borrará TODAS sus sesiones y misiones completadas.\n3. Es irreversible.\n\n¿Deseas continuar?`;
+    
+    if (!window.confirm(confirmMsg)) return;
+    
+    try {
+      setIsAuthLoading(true); // Reuse loading state to show progress
+      playSound('click');
+      
+      // 1. Delete all sessions for this specific user ID
+      const sessionsRef = collection(db, 'sessions');
+      const q = query(sessionsRef, where('userId', '==', studentId));
+      const sessionSnap = await getDocs(q);
+      
+      const batch = writeBatch(db);
+      
+      // Add each session found to the batch
+      sessionSnap.docs.forEach((d) => {
+        batch.delete(d.ref);
+      });
+      
+      // 2. Delete the user document in the users collection
+      const userRef = doc(db, 'users', studentId);
+      batch.delete(userRef);
+      
+      // Execute all deletions atomically
+      await batch.commit();
+      
+      alert(`Éxito: El estudiante "${studentName}" y sus ${sessionSnap.size} registros han sido borrados.`);
+    } catch (e: any) {
+      console.error("Error al eliminar estudiante:", e);
+      if (e.code === 'permission-denied') {
+        alert("PERMISO DENEGADO: Solo el administrador principal puede realizar esta acción.");
+      } else {
+        alert(`ERROR CRÍTICO: ${e.message || 'No se pudo completar la operación'}`);
+      }
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
 
   const filteredAdminData = useMemo(() => {
     let data = [...adminData];
@@ -192,7 +352,7 @@ export default function App() {
   }, [adminData, adminSearch, adminGradeFilter, adminSortBy]);
 
   const uniqueGrades = useMemo(() => {
-    const grades = new Set(adminData.map(s => s.userGrade).filter(Boolean));
+    const grades = new Set(adminData.map(s => s.userGrade).filter(g => g && g !== '10°A'));
     return Array.from(grades).sort();
   }, [adminData]);
 
@@ -213,6 +373,19 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [isGuest, setIsGuest] = useState(false);
 
+  const [xp, setXp] = useState(0);
+  const [showSlope, setShowSlope] = useState(false);
+  const [showArea, setShowArea] = useState(false);
+  const [activeTab, setActiveTab] = useState<'concepts' | 'formulas'>('concepts');
+
+  const performanceRating = useMemo(() => {
+    const score = (coins > 0 && currentChallengeIdx > 0) ? (coins / (currentChallengeIdx * 400)) * 100 : 0; // Rough estimate
+    if (score >= 90) return { label: 'SUPERIOR', color: 'text-kart-green', bg: 'bg-kart-green' };
+    if (score >= 75) return { label: 'ALTO', color: 'text-kart-blue', bg: 'bg-kart-blue' };
+    if (score >= 60) return { label: 'BÁSICO', color: 'text-kart-yellow', bg: 'bg-kart-yellow' };
+    return { label: 'BAJO', color: 'text-kart-red', bg: 'bg-kart-red' };
+  }, [coins, currentChallengeIdx]);
+
   useEffect(() => {
     return onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
@@ -226,8 +399,8 @@ export default function App() {
           profile = {
             fullName: user.displayName || user.email?.split('@')[0] || 'PILOTO',
             email: user.email,
-            grade: 'INVITADO',
-            institution: 'COLEGIO GOOGLE',
+            grade: '', // Start empty to trigger selection
+            institution: 'I.E. Josefa Campos',
             createdAt: serverTimestamp()
           };
           await setDoc(doc(db, 'users', user.uid), profile);
@@ -236,6 +409,12 @@ export default function App() {
         setUserProfile(profile);
         setUserName(profile.fullName);
         setUserGrade(profile.grade);
+
+        // Redirect to grade selection if not set OR if it's the old invalid grade
+        const isInvalidGrade = profile.grade === '10°A';
+        if ((!profile.grade || isInvalidGrade) && gameState !== 'admin') {
+          setGameState('grade_selection');
+        }
         
         // Try to resume session
         const q = query(
@@ -250,6 +429,7 @@ export default function App() {
           const data = lastSession.data();
           setSessionId(lastSession.id);
           setCoins(data.coins || 0);
+          setXp(data.xp || 0);
           setCurrentChallengeIdx(data.challengesCompleted || 0);
           if (data.selectedCharId) {
             const char = CHARACTERS.find(c => c.id === data.selectedCharId);
@@ -260,15 +440,53 @@ export default function App() {
         setUserProfile(null);
         setSessionId(null);
         setCoins(0);
+        setXp(0);
         setCurrentChallengeIdx(0);
       }
     });
   }, []);
 
+  const startSession = async () => {
+    if (isGuest) {
+      setSessionId('guest-session-' + Date.now());
+      try {
+        const statsRef = doc(db, 'stats', 'visitors');
+        await setDoc(statsRef, {
+          count: increment(1),
+          lastVisitorAt: serverTimestamp()
+        }, { merge: true });
+      } catch (e) {
+        console.error("Error updating visitor count:", e);
+      }
+      return;
+    }
+    try {
+      const docRef = await addDoc(collection(db, 'sessions'), {
+        userId: currentUser?.uid || null,
+        userName,
+        userGrade,
+        selectedCharId: selectedChar?.id,
+        coins: 0,
+        xp: 0,
+        totalScore: 0,
+        challengesCompleted: 0,
+        startedAt: serverTimestamp(),
+        lastActiveAt: serverTimestamp()
+      });
+      setSessionId(docRef.id);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     if (gameState === 'admin' && currentUser?.email === 'iejosefacampos2025@gmail.com') {
+      const statsUnsub = onSnapshot(doc(db, 'stats', 'visitors'), (doc) => {
+        if (doc.exists()) setGuestStats(doc.data());
+      });
+
       const q = query(collection(db, 'sessions'), orderBy('lastActiveAt', 'desc'));
-      return onSnapshot(q, async (snapshot) => {
+      const sessionsUnsub = onSnapshot(q, async (snapshot) => {
         const sessionsPromises = snapshot.docs.map(async (d) => {
           const sessionData = { id: d.id, ...d.data() } as any;
           const responsesQuery = query(collection(db, 'sessions', d.id, 'responses'), orderBy('timestamp', 'asc'));
@@ -284,76 +502,212 @@ export default function App() {
         const data = await Promise.all(sessionsPromises);
         setAdminData(data);
       });
+
+      return () => {
+        statsUnsub();
+        sessionsUnsub();
+      };
     }
   }, [gameState, currentUser]);
 
-  const startSession = async () => {
+  const updateSessionWithReward = async (reward: number, gainXp: number, correct: boolean, studentAnswer: string) => {
     if (isGuest) {
-      setSessionId('guest-session-' + Date.now());
+      // Update global guest stats instead of individual session
+      try {
+        const statsRef = doc(db, 'stats', 'visitors');
+        await updateDoc(statsRef, {
+          totalResponses: increment(1),
+          totalCorrect: increment(correct ? 1 : 0),
+          lastActiveAt: serverTimestamp()
+        });
+      } catch (e) {
+        // Create document if it doesn't exist
+        try {
+          const statsRef = doc(db, 'stats', 'visitors');
+          await setDoc(statsRef, {
+            count: 1,
+            totalResponses: 1,
+            totalCorrect: correct ? 1 : 0,
+            lastActiveAt: serverTimestamp()
+          }, { merge: true });
+        } catch (err) {
+          console.error("Error updating guest stats:", err);
+        }
+      }
+      setCoins(prev => prev + (correct ? 10 : 0)); // Symbolic in state
       return;
     }
+    if (!sessionId) return;
     try {
-      const docRef = await addDoc(collection(db, 'sessions'), {
-        userId: currentUser?.uid || null,
-        userName,
-        userGrade,
-        selectedCharId: selectedChar?.id,
-        coins: 0,
-        totalScore: 0,
-        challengesCompleted: 0,
-        startedAt: serverTimestamp(),
-        lastActiveAt: serverTimestamp()
+      const sessionRef = doc(db, 'sessions', sessionId);
+      const newCoins = coins + reward;
+      const newXp = xp + gainXp;
+      await updateDoc(sessionRef, {
+        coins: newCoins,
+        xp: newXp,
+        challengesCompleted: currentChallengeIdx + 1,
+        lastActiveAt: serverTimestamp(),
+        totalScore: Math.round((newCoins / ((currentChallengeIdx + 1) * 200)) * 100) // Adjust base for scoring
       });
-      setSessionId(docRef.id);
+      const collName = gameState === 'guided_examples' ? 'guided_responses' : 'responses';
+      await addDoc(collection(db, 'sessions', sessionId, collName), {
+        challengeId: (gameState === 'guided_examples' ? GUIDED_EXAMPLES : CHALLENGES)[currentChallengeIdx].id,
+        answer: studentAnswer,
+        isCorrect: correct,
+        timestamp: serverTimestamp()
+      });
+      setCoins(newCoins);
+      setXp(newXp);
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const selectCharacter = async (char: Character) => {
+    setSelectedChar(char);
+    playSound('characterSelect');
+    if (isGuest) {
+      setGameState('main_menu');
+      return;
+    }
+    setGameState('main_menu');
+    await startSession();
+  };
+
+  const saveGrade = async (grade: string) => {
+    if (!currentUser) return;
+    try {
+      playSound('click');
+      const userRef = doc(db, 'users', currentUser.uid);
+      await updateDoc(userRef, { grade });
+      setUserGrade(grade);
+      setUserProfile((prev: any) => ({ ...prev, grade }));
+      setGameState('character_selection');
+    } catch (e) {
+      console.error("Error saving grade:", e);
+    }
+  };
+
+  const [currentNarrative, setCurrentNarrative] = useState('');
+  const [showConceptDetails, setShowConceptDetails] = useState<Concept | null>(null);
+  const [showHint, setShowHint] = useState(false);
+
+  const startChallenge = (idx: number, isGuided: boolean) => {
+    const challenge = isGuided ? GUIDED_EXAMPLES[idx] : CHALLENGES[idx];
+    setCurrentChallengeIdx(idx);
+    setGameState(isGuided ? 'guided_examples' : 'challenges');
+    setMode(challenge.mode);
+    if (challenge.initialValues) {
+      if (challenge.initialValues.v !== undefined) setVelocity(challenge.initialValues.v);
+      if (challenge.initialValues.t !== undefined) setTime(challenge.initialValues.t);
+      if (challenge.initialValues.d !== undefined) setDistance(challenge.initialValues.d);
+      if (challenge.initialValues.v2 !== undefined) setV2(challenge.initialValues.v2);
+      if (challenge.initialValues.dTotal !== undefined) setDTotal(challenge.initialValues.dTotal);
+      if (challenge.initialValues.isChase !== undefined) setIsChase(challenge.initialValues.isChase);
+    }
+    setCurrentNarrative(challenge.narrative);
+    setSimTime(0);
+    setIsRunning(false);
+    setHasCelebrated(false);
+    setShowHint(false); // Reset hint
+    playSound('click');
   };
 
   const handleLogout = async () => {
     if (isGuest) {
       setIsGuest(false);
       setGameState('intro');
+      setCurrentNarrative('');
+      setFeedback(null);
+      resetSim();
       return;
     }
     await signOut(auth);
     setGameState('intro');
+    setCurrentNarrative('');
+    setFeedback(null);
+    resetSim();
   };
+
+  const AppHeader = () => (
+    <div className="flex items-center justify-between bg-white p-4 border-4 border-black shadow-[6px_6px_0px_#000] sticky top-0 z-50">
+      <div className="flex items-center gap-4">
+        <button onClick={() => { setGameState('main_menu'); setCurrentNarrative(''); setFeedback(null); resetSim(); }} className="hover:scale-110 transition-transform">
+          <img src={selectedChar?.image || '/vector2.png'} className="w-16 h-16 object-contain" />
+        </button>
+        <div>
+          <p className="font-display font-black italic text-xl uppercase leading-none">{userName}</p>
+          <p className="font-tech text-[10px] text-slate-400 uppercase">{userGrade} | {userProfile?.institution || 'JOSÉFA CAMPOS'}</p>
+          <div className="mt-1 w-32 h-2 bg-slate-200 border border-black overflow-hidden flex">
+            <motion.div 
+              initial={{ width: 0 }}
+              animate={{ width: `${Math.min(100, (xp / 1000) * 100)}%` }}
+              className="h-full bg-kart-green"
+            />
+          </div>
+        </div>
+      </div>
+      <div className="flex gap-4 items-center">
+        <div className="hidden md:flex flex-col items-center">
+          <p className="text-[8px] font-tech uppercase text-slate-400">Desempeño</p>
+          <p className={cn("font-display font-black italic text-lg leading-none", performanceRating.color)}>{performanceRating.label}</p>
+        </div>
+        <div className="bg-kart-yellow p-2 border-2 border-black font-tech font-bold flex items-center gap-2">
+          <Coins size={16} /> <span className="text-sm">{coins}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => { setSoundEnabled(!soundEnabled); if (!soundEnabled) playSound('click'); }} className="p-2 border-2 border-black bg-white transition-colors hover:bg-slate-50">
+            {soundEnabled ? <Zap className="text-kart-blue" size={18} /> : <Skull className="text-slate-400" size={18} />}
+          </button>
+          <button onClick={() => { handleLogout(); playSound('click'); }} className="p-2 border-2 border-black bg-white hover:bg-kart-red hover:text-white transition-colors group">
+            <LogOut size={18} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const MainMenuCard = ({ title, icon, onClick, color, description }: { title: string, icon: any, onClick: () => void, color: string, description: string }) => (
+    <button 
+      onClick={onClick}
+      className={cn(
+        "group p-6 border-4 border-black text-left space-y-4 transition-all hover:-translate-y-1 hover:shadow-[8px_8px_0px_#000] relative overflow-hidden",
+        color === 'blue' ? "bg-kart-blue text-white" : color === 'green' ? "bg-kart-green text-white" : color === 'red' ? "bg-kart-red text-white" : "bg-kart-yellow text-black"
+      )}
+    >
+      <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center border-2 border-black/10">
+        {icon}
+      </div>
+      <div>
+        <h3 className="font-display font-black italic text-2xl uppercase leading-tight">{title}</h3>
+        <p className="font-tech text-xs opacity-80 uppercase leading-none mt-1">{description}</p>
+      </div>
+      <div className="absolute top-2 right-2 opacity-10 group-hover:opacity-20 transition-opacity">
+        {icon}
+      </div>
+    </button>
+  );
 
   const resetSim = () => {
     setSimTime(0);
+    setRaceTime(0);
+    setHasCrossedStart(false);
+    setHasFinished(false);
     setIsRunning(false);
     setHasCelebrated(false);
   };
 
-  const handleInputChange = (field: 'v' | 't' | 'd', value: string) => {
+  const handleInputChange = (field: 'v' | 't' | 'd' | 'v2' | 'dt', value: string) => {
     const val = Number(value);
     if (field === 'v') setVelocity(val);
     else if (field === 't') setTime(val);
     else if (field === 'd') setDistance(val);
+    else if (field === 'v2') setV2(val);
+    else if (field === 'dt') setDTotal(val);
     resetSim();
   };
 
-  const updateSession = async (newCoins: number, correct: boolean, studentAnswer: string) => {
-    if (isGuest || !sessionId) return;
-    try {
-      const sessionRef = doc(db, 'sessions', sessionId);
-      await updateDoc(sessionRef, {
-        coins: newCoins,
-        challengesCompleted: currentChallengeIdx + 1,
-        lastActiveAt: serverTimestamp(),
-        totalScore: Math.round((newCoins / ((currentChallengeIdx + 1) * 50)) * 100)
-      });
-      await addDoc(collection(db, 'sessions', sessionId, 'responses'), {
-        challengeId: CHALLENGES[currentChallengeIdx].id,
-        answer: studentAnswer,
-        isCorrect: correct,
-        timestamp: serverTimestamp()
-      });
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  const [showCredits, setShowCredits] = useState(false);
 
   const handleDeleteSession = async (id: string, name: string) => {
     if (!window.confirm(`¿Estás seguro de que deseas eliminar el registro de "${name}"? Esta acción no se puede deshacer.`)) return;
@@ -380,6 +734,9 @@ export default function App() {
   const [isChase, setIsChase] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [simTime, setSimTime] = useState(0);
+  const [raceTime, setRaceTime] = useState(0);
+  const [hasCrossedStart, setHasCrossedStart] = useState(false);
+  const [hasFinished, setHasFinished] = useState(false);
   const [hasCelebrated, setHasCelebrated] = useState(false);
   const requestRef = useRef<number>(null);
   const lastUpdateTimeRef = useRef<number>(null);
@@ -405,15 +762,25 @@ export default function App() {
         const deltaTime = (now - lastUpdateTimeRef.current) / 1000;
         setSimTime(prev => {
           const next = prev + deltaTime;
-          const waitTime = (1600 + 130) / 10 / (effV || 1);
-          if (!hasCelebrated && next >= (effT + waitTime)) {
+          
+          if (next > 0 && !hasCrossedStart) setHasCrossedStart(true);
+
+          // Celebration happens exactly when crossing the finish line
+          if (!hasCelebrated && next >= effT && effT > 0) {
             setHasCelebrated(true);
+            setHasFinished(true);
             triggerCelebration();
           }
-          const stopTime = effT + waitTime + 1.5;
-          if (next >= stopTime) {
+
+          if (!hasFinished) {
+            setRaceTime(next);
+          }
+
+          // Let simulation run past effT for crossing animation
+          const animationStopTime = effT + (effV > 0 ? (200 / (effV * 10)) : 1.5);
+          if (next >= animationStopTime && effT > 0) {
             setIsRunning(false);
-            return stopTime;
+            return animationStopTime;
           }
           return next;
         });
@@ -424,7 +791,7 @@ export default function App() {
     if (isRunning) requestRef.current = requestAnimationFrame(animate);
     else if (requestRef.current) cancelAnimationFrame(requestRef.current);
     return () => { if (requestRef.current) cancelAnimationFrame(requestRef.current); };
-  }, [isRunning, effT, hasCelebrated, effV]);
+  }, [isRunning, effT, hasCelebrated, hasCrossedStart, hasFinished]);
 
   const triggerCelebration = () => {
     confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
@@ -477,368 +844,745 @@ export default function App() {
     }
   };
 
-  const handleAnswer = (answer: string) => {
-    const challenge = CHALLENGES[currentChallengeIdx];
+  const handleAnswer = async (answer: string) => {
+    const list = gameState === 'guided_examples' ? GUIDED_EXAMPLES : CHALLENGES;
+    const challenge = list[currentChallengeIdx];
     const isCorrect = answer === challenge.correctAnswer;
+    
     if (isCorrect) {
-      setCoins(c => c + challenge.reward);
-      setFeedback({ correct: true, message: "¡EXCELENTE! Has salvado un sector de la galaxia." });
+      setFeedback({ correct: true, message: "¡BRUTAL! Has salvado un sector de la galaxia." });
       playSound('success');
-      updateSession(coins + challenge.reward, true, answer);
+      if (gameState === 'challenges') {
+        const reward = challenge.reward;
+        const gainXp = challenge.xp;
+        await updateSessionWithReward(reward, gainXp, true, answer);
+      } else {
+        // Just visual feedback for guided examples
+        setCoins(c => c + 10); // Symbolic reward
+      }
     } else {
-      setFeedback({ correct: false, message: "¡OH NO! El cálculo falló. ¡Inténtalo de nuevo!" });
+      setFeedback({ correct: false, message: "¡ERROR DE CÁLCULO! El sistema detecta una anomalía. ¡Inténtalo de nuevo!" });
       playSound('fail');
-      updateSession(coins, false, answer);
+      if (gameState === 'challenges') {
+        await updateSessionWithReward(0, 0, false, answer);
+      }
     }
   };
 
   const nextChallenge = () => {
     setFeedback(null);
-    if (currentChallengeIdx < CHALLENGES.length - 1) {
+    const list = gameState === 'guided_examples' ? GUIDED_EXAMPLES : CHALLENGES;
+    if (currentChallengeIdx < list.length - 1) {
       const nextIdx = currentChallengeIdx + 1;
-      setCurrentChallengeIdx(nextIdx);
-      setMode(CHALLENGES[nextIdx].mode);
-      setShowChallenge(false);
-      setSimTime(0); setIsRunning(false); setHasCelebrated(false);
+      startChallenge(nextIdx, gameState === 'guided_examples');
     } else {
-      setGameState('results');
+      if (gameState === 'guided_examples') {
+        setGameState('main_menu');
+        setCurrentNarrative('');
+      } else {
+        setGameState('results');
+        setCurrentNarrative('');
+        setFeedback(null);
+      }
     }
   };
 
   const graphData = useMemo(() => {
     const data = [];
-    const maxT = Math.max(effT, 10);
-    for (let i = 0; i <= 30; i++) {
-       const t = (maxT / 30) * i;
-       data.push({ time: t, distance: effV * t });
+    const targetT = effT > 0 ? effT : 10;
+    const maxT = targetT * 1.2; // Show slightly more than the event time
+    const steps = 60;
+    
+    for (let i = 0; i <= steps; i++) {
+       const t = (maxT / steps) * i;
+       const d1 = effV * t;
+       const v1 = effV;
+       let point: any = { time: t.toFixed(1), distance: Number(d1.toFixed(1)), vel: v1 };
+       
+       if (mode === 'meeting' || mode === 'overtaking') {
+         const d2 = isChase ? (dTotal + v2 * t) : (dTotal - v2 * t);
+         point.distance2 = Number(d2.toFixed(1));
+         point.vel2 = v2;
+       }
+       data.push(point);
     }
     return data;
-  }, [effV, effT]);
+  }, [effV, v2, dTotal, mode, effT, isChase]);
 
   return (
-    <div className="min-h-screen bg-kart-sky p-4 font-sans selection:bg-kart-yellow">
-      <AnimatePresence mode="wait">
-        {/* INTRO SCREEN */}
+    <div className="min-h-screen bg-kart-sky p-4 font-sans selection:bg-kart-yellow overflow-x-hidden">
+      <main className="container mx-auto px-4 py-8 relative z-10 min-h-[calc(100vh-80px)]">
+        {(['main_menu', 'concepts', 'formulas', 'guided_examples', 'challenges', 'playing', 'results'].includes(gameState)) && <AppHeader />}
+        <AnimatePresence mode="wait">
         {gameState === 'intro' && (
-          <motion.div key="intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="max-w-2xl mx-auto mt-20 p-12 bg-white border-4 border-black text-center space-y-8 shadow-[10px_10px_0px_#000]">
-            <Star size={64} className="mx-auto text-kart-red font-black" />
-            <h1 className="text-5xl font-display font-black italic uppercase text-kart-red">MRU HEROES</h1>
-            <p className="font-tech text-slate-500 uppercase tracking-widest text-sm">Entrenamiento Galáctico de Física</p>
+          <motion.div key="intro" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="max-w-4xl mx-auto text-center space-y-12 mt-20">
+            <div className="relative inline-block">
+              <motion.h1 
+                initial={{ scale: 0.8 }}
+                animate={{ scale: 1 }}
+                className="text-8xl font-display font-black italic text-kart-red uppercase tracking-tighter drop-shadow-[8px_8px_0px_#000] rotate-[-2deg]"
+              >
+                MRU HEROES
+              </motion.h1>
+              <div className="absolute -top-6 -right-6 bg-kart-yellow text-black px-4 py-1 font-tech font-bold border-4 border-black rotate-[15deg]">V2.0</div>
+            </div>
             
-            {!currentUser ? (
-              <div className="flex flex-col gap-4">
-                <button 
-                  onClick={async () => {
-                    try {
-                      const user = await signInWithGoogle();
-                      if (user) {
-                        setGameState('character_selection');
-                        playSound('click');
-                      }
-                    } catch (err: any) {
-                      if (err.code === 'auth/operation-not-allowed') {
-                        alert('ERROR: El proveedor de Google no está habilitado en la consola de Firebase.');
-                      } else {
-                        alert('Error con Google: ' + err.message);
-                      }
-                    }
-                  }} 
-                  className="kart-button bg-kart-blue text-white py-6 text-2xl flex items-center justify-center gap-3 w-full"
-                >
-                  <LogIn size={28} /> ENTRAR CON GOOGLE
-                </button>
+            <p className="font-tech text-xl text-slate-600 uppercase max-w-2xl mx-auto border-y-4 border-black py-4">
+              Domina la cinemática, salva la galaxia. El simulador de física definitivo de la I.E. Josefa Campos.
+            </p>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto">
+              {currentUser ? (
+                <div className="flex flex-col gap-4 col-span-full">
+                  <button 
+                    onClick={() => { playSound('click'); setGameState('main_menu'); }}
+                    className="kart-button bg-kart-green text-white py-6 text-xl flex items-center justify-center gap-4 group border-4 border-black"
+                  >
+                    <ArrowRight />
+                    CONTINUAR COMO {userName}
+                  </button>
+                  <button 
+                    onClick={() => { playSound('click'); handleLogout(); }}
+                    className="font-tech text-xs text-slate-400 hover:text-kart-red transition-colors uppercase"
+                  >
+                    Cerrar sesión o cambiar de cuenta
+                  </button>
+                </div>
+              ) : (
                 <button 
-                  onClick={() => { 
-                    setIsGuest(true); 
-                    setGameState('character_selection'); 
-                    playSound('click'); 
-                  }} 
-                  className="kart-button bg-white text-black py-4 text-xl flex items-center justify-center gap-2 border-4 border-black"
+                  onClick={() => { playSound('click'); signInWithGoogle(); }}
+                  disabled={isAuthLoading}
+                  className="kart-button bg-kart-blue text-white py-6 text-xl flex items-center justify-center gap-4 group"
                 >
-                  ENTRAR COMO INVITADO
+                  {isAuthLoading ? <Loader2 className="animate-spin" /> : <LogIn />}
+                  ENTRAR CON GOOGLE
                 </button>
-                
-                <p className="font-tech text-[10px] text-slate-400 uppercase text-center">Usa tu cuenta personal para guardar tu progreso</p>
+              )}
+              <button 
+                onClick={() => { playSound('click'); setIsGuest(true); setGameState('character_selection'); }}
+                className="kart-button bg-white text-black py-6 text-xl flex items-center justify-center gap-4 border-4 border-black"
+              >
+                <User /> VER COMO VISITANTE
+              </button>
+            </div>
+
+            <button 
+              onClick={() => setShowCredits(true)}
+              className="font-tech text-xs text-slate-400 hover:text-black transition-colors uppercase tracking-widest"
+            >
+              Créditos & Información
+            </button>
+          </motion.div>
+        )}
+
+        {gameState === 'grade_selection' && (
+          <motion.div key="grades" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="max-w-2xl mx-auto space-y-12 mt-10">
+            <div className="text-center space-y-4">
+              <h2 className="text-5xl font-display font-black italic uppercase text-kart-blue">Configura tu Perfil</h2>
+              <p className="font-tech text-slate-500 uppercase tracking-widest leading-relaxed">Selecciona tu grado para registrar tu progreso en el Dashboard docente.</p>
+              <div className="bg-kart-yellow/20 p-4 border-2 border-kart-yellow border-dashed text-kart-yellow font-tech text-[10px] uppercase font-bold">
+                * Esta elección es única y no podrá cambiarse después.
               </div>
-            ) : (
-              <div className="space-y-4">
-                <p className="font-display font-black italic text-2xl text-kart-blue uppercase">HOLA DE NUEVO, {userProfile?.fullName || userName}!</p>
-                <button 
-                  onClick={() => { setGameState('character_selection'); playSound('click'); }} 
-                  className="kart-button w-full bg-kart-red text-white py-4 text-2xl"
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              {GRADES.map((grade) => (
+                <button
+                  key={grade}
+                  onClick={() => saveGrade(grade)}
+                  className="group relative bg-white border-4 border-black p-6 shadow-[6px_6px_0px_#000] hover:shadow-[10px_10px_0px_#000] hover:-translate-y-1 transition-all flex flex-col items-center justify-center text-center gap-2"
                 >
-                  CONTINUAR MISIÓN
+                  <GraduationCap className="text-slate-200 group-hover:text-kart-blue transition-colors" size={32} />
+                  <span className="font-display font-black italic text-xl uppercase leading-none">{grade}</span>
                 </button>
-                <button 
-                  onClick={() => { handleLogout(); playSound('click'); }}
-                  className="text-slate-400 font-tech text-xs uppercase hover:text-kart-red transition-colors flex items-center justify-center gap-2 mx-auto"
-                >
-                  <LogOut size={12} /> Cerrar Sesión
-                </button>
-              </div>
-            )}
+              ))}
+            </div>
+            
+            <div className="text-center">
+               <button onClick={handleLogout} className="font-tech text-[10px] text-slate-400 hover:text-kart-red uppercase transition-colors">Cancelar e Iniciar Sesión con otra cuenta</button>
+            </div>
           </motion.div>
         )}
 
         {gameState === 'character_selection' && (
-          <motion.div key="char" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-4xl mx-auto mt-10 space-y-10">
-            <h2 className="text-center text-4xl font-display font-black italic uppercase text-kart-blue">Elige tu Piloto</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-              {CHARACTERS.map(char => (
-                <button key={char.id} onClick={() => { setSelectedChar(char); playSound('click'); }} className={cn("p-4 border-4 border-black bg-white", selectedChar?.id === char.id && "bg-kart-yellow")}>
-                  <img src={char.image} alt={char.name} className="w-full" />
-                  <p className="font-display font-bold italic mt-2">{char.name}</p>
-                </button>
+          <motion.div key="chars" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-6xl mx-auto space-y-12">
+            <div className="text-center space-y-4">
+              <h2 className="text-5xl font-display font-black italic uppercase text-kart-blue">Elige tu Piloto</h2>
+              <p className="font-tech text-slate-500 uppercase tracking-widest">Cada héroe domina una dimensión de la cinemática</p>
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+              {CHARACTERS.map((char) => (
+                <motion.button
+                  key={char.id}
+                  whileHover={{ scale: 1.05, translateY: -10 }}
+                  onClick={() => selectCharacter(char)}
+                  className="group relative bg-white border-4 border-black p-8 shadow-[8px_8px_0px_#000] hover:shadow-[12px_12px_0px_#000] transition-all flex flex-col items-center text-center space-y-4"
+                >
+                  <div className={cn("absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity", char.color.replace('text-', 'bg-'))}></div>
+                  <img src={char.image} alt={char.name} className="w-40 h-40 object-contain z-10" />
+                  <h3 className="text-2xl font-display font-black italic uppercase group-hover:text-kart-red transition-colors">{char.name}</h3>
+                  <p className="font-tech text-xs text-slate-400 leading-relaxed uppercase">{char.description}</p>
+                </motion.button>
               ))}
             </div>
-            <button onClick={() => { startSession(); setGameState('playing'); playSound('start'); }} disabled={!selectedChar} className="kart-button mx-auto block bg-kart-green text-white px-20 py-4">GO!</button>
           </motion.div>
         )}
 
-        {gameState === 'playing' && (
-          <motion.div key="playing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-6xl mx-auto space-y-8">
-            <div className="flex items-center justify-between bg-white p-4 border-4 border-black shadow-[6px_6px_0px_#000]">
-               <div className="flex items-center gap-4">
-                 <img src={selectedChar?.image} className="w-16 h-16 object-contain" />
-                 <div>
-                   <p className="font-display font-black italic text-xl uppercase leading-none">{userName}</p>
-                   <p className="font-tech text-xs text-slate-400 uppercase">{userGrade} | {userProfile?.institution || 'PILOTO'}</p>
-                 </div>
-               </div>
-               <div className="flex gap-4 items-center">
-                 <button 
-                  onClick={() => {
-                    setShowTutorial(true);
-                    setTutorialStep(0);
-                    playSound('click');
-                  }}
-                  className="flex items-center gap-2 font-tech text-[10px] text-slate-400 hover:text-kart-blue uppercase transition-colors"
-                >
-                  <Info size={14} /> Tutorial
-                </button>
-                 <div className="bg-kart-yellow p-2 border-2 border-black font-tech font-bold flex items-center gap-2">
-                    <Coins size={16} /> COINS: {coins}
-                 </div>
-                 <div className="flex items-center bg-slate-100 p-1 border-2 border-black">
-                  <button 
-                    onClick={() => { setIsPracticeMode(false); playSound('click'); }}
-                    className={cn(
-                      "px-3 py-1 text-[10px] font-black uppercase transition-all",
-                      !isPracticeMode ? "bg-kart-red text-white" : "text-slate-400"
-                    )}
-                  >
-                    Misión
-                  </button>
-                  <button 
-                    onClick={() => { setIsPracticeMode(true); playSound('click'); }}
-                    className={cn(
-                      "px-3 py-1 text-[10px] font-black uppercase transition-all",
-                      isPracticeMode ? "bg-kart-blue text-white" : "text-slate-400"
-                    )}
-                  >
-                    Libre
-                  </button>
-                </div>
-                  <button onClick={() => { setSoundEnabled(!soundEnabled); if (!soundEnabled) playSound('click'); }} className="p-2 border-2 border-black bg-white">
-                    {soundEnabled ? <Zap className="text-kart-blue" /> : <Skull className="text-slate-400" />}
-                  </button>
-                  <button 
-                  onClick={() => { handleLogout(); playSound('click'); }}
-                  className="p-2 border-2 border-black bg-white hover:bg-kart-red hover:text-white transition-colors group"
-                  title="Cerrar Sesión"
-                >
-                   <LogOut size={20} />
-                 </button>
-                 <button onClick={() => { setShowChallenge(true); playSound('click'); }} className="bg-kart-red text-white p-2 px-4 shadow-[3px_3px_0px_#000] border-2 border-black font-tech text-xs uppercase italic">MISIÓN</button>
-               </div>
+        {gameState === 'main_menu' && (
+          <motion.div key="menu" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="max-w-6xl mx-auto space-y-12 mt-10">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <MainMenuCard 
+                title="Conceptos Básicos" 
+                icon={<BookOpen size={32} />} 
+                description="Aprende sobre posición, velocidad y más"
+                color="blue"
+                onClick={() => { setGameState('concepts'); playSound('click'); }}
+              />
+              <MainMenuCard 
+                title="Fórmulas y Unidades" 
+                icon={<Settings2 size={32} />} 
+                description="Tu manual de herramientas físicas"
+                color="green"
+                onClick={() => { setGameState('formulas'); playSound('click'); }}
+              />
+              <MainMenuCard 
+                title="Ejemplos Guiados" 
+                icon={<Rocket size={32} />} 
+                description="Simulaciones paso a paso"
+                color="yellow"
+                onClick={() => { setGameState('guided_examples'); playSound('click'); }}
+              />
+              <MainMenuCard 
+                title="Retos del Sistema" 
+                icon={<Trophy size={32} />} 
+                description="Demuestra tu dominio y gana coins"
+                color="red"
+                onClick={() => { setGameState('challenges'); playSound('click'); }}
+              />
             </div>
+            
+            <div className="bg-slate-100 border-4 border-black p-8 text-center space-y-4">
+              <h3 className="font-display font-black italic text-2xl uppercase">Simulador Libre</h3>
+              <p className="font-tech text-sm text-slate-500 uppercase">Experimenta sin límites con las leyes del MRU</p>
+              <button 
+                onClick={() => { setGameState('playing'); setMode('distance'); setIsPracticeMode(true); playSound('click'); }}
+                className="kart-button bg-black text-white px-12 py-3 text-lg italic uppercase"
+              >
+                Activar Laboratorio
+              </button>
+            </div>
+          </motion.div>
+        )}
 
-            <section className="bg-white border-4 border-black p-8 relative overflow-hidden">
-               <div className="relative h-[400px] border-4 border-black bg-slate-200 overflow-hidden" 
-                    style={{ backgroundImage: 'url(https://i.postimg.cc/SKLKtD5d/background2.png)', backgroundSize: 'auto 100%' }}>
-                  <motion.div style={{ x: simTime * -effV * 10, display: 'flex' }}>
-                    <div style={{ minWidth: '1600px', height: '400px', backgroundImage: 'url(https://i.postimg.cc/SKLKtD5d/background2.png)' }} />
-                    <div style={{ minWidth: '1200px', height: '400px', backgroundImage: 'url(https://i.postimg.cc/7L1LQmcn/background1.png)' }} />
+        {gameState === 'concepts' && (
+          <motion.div key="concepts" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-6xl mx-auto space-y-8">
+             <div className="flex items-center gap-4 mb-8">
+               <button onClick={() => setGameState('main_menu')} className="p-2 border-2 border-black hover:bg-slate-100 transition-colors"><ArrowRight className="rotate-180" /></button>
+               <h2 className="text-4xl font-display font-black italic uppercase">Conceptos Cinemática</h2>
+             </div>
+             
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+               {CONCEPTS.map(c => (
+                 <div key={c.id} className="bg-white border-4 border-black p-6 shadow-[6px_6px_0px_#000] space-y-4">
+                   <div className="flex items-center gap-4">
+                     <div className="p-3 bg-slate-100 border-2 border-black" style={{ color: c.color }}>{c.icon}</div>
+                     <h3 className="font-display font-black italic text-xl uppercase leading-none">{c.title}</h3>
+                   </div>
+                   <p className="font-tech text-sm leading-relaxed text-slate-600 uppercase">{c.definition}</p>
+                    {c.formula && (
+                      <div className="mt-4 pt-4 border-t border-slate-100 flex justify-center scale-110">
+                        <div className="bg-slate-50 px-6 py-2 border-2 border-black/5 rounded-lg shadow-inner">
+                          <InlineMath math={c.formula} />
+                        </div>
+                      </div>
+                    )}
+                 </div>
+               ))}
+             </div>
+          </motion.div>
+        )}
+
+        {gameState === 'formulas' && (
+          <motion.div key="formulas" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-4xl mx-auto space-y-8">
+             <div className="flex items-center gap-4 mb-8">
+               <button onClick={() => setGameState('main_menu')} className="p-2 border-2 border-black hover:bg-slate-100 transition-colors"><ArrowRight className="rotate-180" /></button>
+               <h2 className="text-4xl font-display font-black italic uppercase">Fórmulas y Unidades</h2>
+             </div>
+
+             <div className="bg-white border-4 border-black shadow-[8px_8px_0px_#000] overflow-hidden">
+               <table className="w-full text-left font-tech">
+                 <thead className="bg-black text-white uppercase text-xs">
+                   <tr>
+                     <th className="p-4">Concepto</th>
+                     <th className="p-4">Fórmula Principal</th>
+                     <th className="p-4">Unidad (S.I.)</th>
+                   </tr>
+                 </thead>
+                 <tbody className="divide-y-2 divide-slate-100 uppercase text-sm">
+                   {FORMULAS.map((f, i) => (
+                     <tr key={i} className="hover:bg-slate-50 transition-colors">
+                       <td className="p-4 font-bold">{f.concept}</td>
+                       <td className="p-4 text-kart-red font-black text-xl"><InlineMath math={f.formula} /></td>
+                       <td className="p-4 text-slate-500 font-bold">{f.unit}</td>
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
+             </div>
+          </motion.div>
+        )}
+
+        {(gameState === 'guided_examples' || gameState === 'challenges') && !currentNarrative && (
+          <motion.div key="lists" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-4xl mx-auto space-y-8 mt-10">
+             <div className="flex items-center gap-4 mb-8">
+               <button onClick={() => setGameState('main_menu')} className="p-2 border-2 border-black hover:bg-slate-100 transition-colors"><ArrowRight className="rotate-180" /></button>
+               <h2 className="text-4xl font-display font-black italic uppercase">
+                 {gameState === 'guided_examples' ? 'Entrenamiento' : 'Misiones Galácticas'}
+               </h2>
+             </div>
+
+             <div className="space-y-4">
+               {(gameState === 'guided_examples' ? GUIDED_EXAMPLES : CHALLENGES).map((c, i) => (
+                 <button 
+                  key={c.id} 
+                  disabled={gameState === 'challenges' && i > currentChallengeIdx}
+                  onClick={() => startChallenge(i, gameState === 'guided_examples')}
+                  className={cn(
+                    "w-full bg-white border-4 border-black p-6 flex justify-between items-center transition-all shadow-[6px_6px_0px_#000] hover:shadow-[10px_10px_0px_#000] hover:-translate-y-1",
+                    gameState === 'challenges' && i > currentChallengeIdx && "opacity-40 grayscale pointer-events-none"
+                  )}
+                 >
+                   <div className="flex items-center gap-6">
+                     <div className="w-12 h-12 bg-black text-white rounded-full flex items-center justify-center font-display italic text-2xl border-2 border-white">
+                       {i + 1}
+                     </div>
+                     <div className="text-left">
+                       <h4 className="font-display font-black italic text-xl uppercase leading-none">{gameState === 'guided_examples' ? `Entrenamiento ${i+1}` : `Misión ${i+1}`}</h4>
+                       <p className="font-tech text-xs text-slate-400 uppercase mt-1">Modo: {c.mode}</p>
+                     </div>
+                   </div>
+                   <div className="flex gap-4 items-center">
+                     <span className="font-tech font-bold text-kart-yellow text-sm flex items-center gap-1"><Coins size={14} /> {c.reward}</span>
+                     {i < (gameState === 'challenges' ? currentChallengeIdx : GUIDED_EXAMPLES.length) ? <CheckCircle2 className="text-kart-green" /> : <Play className="text-kart-red" />}
+                   </div>
+                 </button>
+               ))}
+             </div>
+          </motion.div>
+        )}
+
+        {(['playing', 'guided_examples', 'challenges'].includes(gameState)) && (gameState === 'playing' || currentNarrative) && (
+          <motion.div key="playing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-6xl mx-auto space-y-8 mt-10 pb-20">
+            <section className="bg-white border-4 border-black p-6 relative overflow-hidden shadow-[8px_8px_0px_#000]">
+               {currentNarrative && (
+                 <div className="mb-6 p-4 bg-slate-900 text-white font-tech italic text-sm border-l-8 border-kart-red animate-pulse flex items-center gap-3">
+                    <div className="w-2 h-2 bg-kart-red rounded-full animate-ping" />
+                    SYSTEM LOG: {currentNarrative}
+                  </div>
+                )}
+
+               <div className="relative h-[300px] border-4 border-black bg-slate-100 overflow-hidden">
+                  {/* SKY (Static Background) */}
+                  <div className="absolute inset-0 z-0">
+                    <img src="/background1.png" className="w-full h-full object-cover opacity-30" alt="" />
+                  </div>
+
+                  {/* FLOATING DIGITAL TIMER (Top Center) */}
+                  <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center pointer-events-none">
+                    <div className="bg-black/90 border-2 border-kart-red px-6 py-2 rounded shadow-[0_0_20px_rgba(255,30,86,0.5)] flex flex-col items-center min-w-[280px]">
+                      <div className="w-full flex justify-between items-center mb-1 px-1">
+                        <p className="text-[10px] text-kart-red font-tech uppercase tracking-widest animate-pulse">
+                          {hasFinished ? 'CRONÓMETRO FINAL' : 'CRONÓMETRO EN VIVO'}
+                        </p>
+                        <div className="h-1.5 w-1.5 bg-kart-red rounded-full animate-ping" />
+                      </div>
+                      
+                      <div className="flex flex-col items-center gap-1">
+                        <p className="text-4xl font-tech text-white tabular-nums drop-shadow-[0_0_10px_#fff]">
+                          {(() => {
+                            const t = raceTime;
+                            const mins = Math.floor(t / 60).toString().padStart(2, '0');
+                            const secs = Math.floor(t % 60).toString().padStart(2, '0');
+                            const ms = Math.floor((t % 1) * 100).toString().padStart(2, '0');
+                            return `${mins}:${secs}:${ms}`;
+                          })()}
+                        </p>
+                        <div className="w-full h-[1px] bg-white/20 my-1" />
+                        <p className="text-xl font-tech text-kart-red tabular-nums tracking-wider">
+                          DISTANCIA: {(effV * raceTime).toFixed(2)}m
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* MAIN TRACK LAYER (Moving world) */}
+                  <div className="absolute inset-0">
+                    <motion.div 
+                      className="absolute inset-y-0 h-full"
+                      animate={{ x: -(simTime * effV * 10) }}
+                      transition={{ ease: "linear", duration: 0 }}
+                      style={{ left: '40px' }}
+                    >
+                      {/* Segment 1: START */}
+                      <div className="absolute inset-y-0 left-0 h-full w-[1600px] z-10">
+                        <img src="/background1.png" className="w-full h-full object-fill pointer-events-none" />
+                        <div className="absolute inset-0 z-30 pointer-events-none">
+                          <img src="/foreground1.png" className="absolute inset-0 w-full h-full object-fill" />
+                          <div className="absolute top-[18.2%] left-[72%] w-[19.5%] h-[9%] flex items-center justify-center -rotate-1">
+                             <div className="bg-black w-full h-[60%] flex items-center justify-center border border-kart-red/30">
+                                <p className="text-kart-red font-tech text-[14px]">LEVEL 1: MRU</p>
+                             </div>
+                          </div>
+                          <div className="absolute top-[40%] right-[3%] bg-black/80 border border-white/20 p-2 text-white font-tech text-[8px] uppercase">
+                            DATOS DE CARRERA
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Filler background 2 loop */}
+                      {(() => {
+                        const targetPos = effD * 10;
+                        const fillerNeeded = Math.ceil(targetPos / 1600) + 1;
+                        return Array.from({ length: fillerNeeded }).map((_, i) => (
+                          <div key={`fill-${i}`} className="absolute inset-y-0 h-full w-[1604px]" style={{ left: `${(i+1)*1600}px`, zIndex: 0 }}>
+                            <img src="/background2.png" className="w-full h-full object-fill pointer-events-none" />
+                          </div>
+                        ));
+                      })()}
+
+                      {/* Segment Finish: Background 3 */}
+                      <div className="absolute inset-y-0 w-[1600px] h-full" style={{ left: `${effD * 10}px`, zIndex: 35 }}>
+                        <img src="/background3.png" className="w-full h-full object-fill pointer-events-none" />
+                        <div className="absolute inset-0 z-45 pointer-events-none">
+                          <img src="/foreground3.png" className="absolute inset-0 w-full h-full object-fill" />
+                          <div className="absolute top-[18.2%] left-[72%] w-[19.5%] h-[9%] flex items-center justify-center -rotate-1">
+                             <div className="bg-black w-full h-[60%] flex items-center justify-center border border-green-500/30">
+                                <p className="text-green-500 font-tech text-[11px] text-center leading-none">¡LLEGADA! FIN DEL NIVEL 1: MRU</p>
+                             </div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </div>
+
+                  {/* MOBILES */}
+                  <img src={selectedChar?.image || '/vector2.png'} className="absolute bottom-6 left-10 w-28 z-40 drop-shadow-lg" />
+                  
+                  {(mode === 'meeting' || mode === 'overtaking') && (
+                    <motion.img 
+                      src="/magno2.png" 
+                      className="absolute bottom-6 w-40 z-40 grayscale opacity-80"
+                      animate={{ 
+                        left: isChase 
+                          ? `${10 + (80 * (dTotal + (v2 - effV) * simTime) / (dTotal || 1))}%`
+                          : `${10 + (80 * (dTotal - (effV + v2) * simTime) / (dTotal || 1))}%`
+                      }}
+                    />
+                  )}
+
+                  {/* FOREGROUND LAYER */}
+                  <motion.div 
+                    className="absolute inset-0 flex z-30 pointer-events-none"
+                    animate={{ x: (simTime * -effV * 20) % 1600 }}
+                  >
+                    <div className="flex-shrink-0 w-[1600px] h-full flex items-end justify-around pb-2 opacity-50">
+                       <div className="w-8 h-8 bg-black/10 rounded-full blur-xl" />
+                       <div className="w-12 h-12 bg-black/10 rounded-full blur-xl" />
+                    </div>
+                    <div className="flex-shrink-0 w-[1600px] h-full flex items-end justify-around pb-2 opacity-50">
+                       <div className="w-8 h-8 bg-black/10 rounded-full blur-xl" />
+                       <div className="w-12 h-12 bg-black/10 rounded-full blur-xl" />
+                    </div>
                   </motion.div>
-                  <img src={selectedChar?.image} className="absolute bottom-10 left-10 w-24 z-10" />
-                  <div className="absolute top-4 left-4 z-10 flex gap-4">
+
+                  {/* SIDE CONTROL BUTTONS */}
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-4">
                     <button 
                       onClick={() => { setIsRunning(!isRunning); playSound('click'); }} 
-                      className="bg-kart-green p-4 border-4 border-black hover:bg-emerald-400 transition-colors shadow-lg"
+                      className="bg-kart-green p-3 border-2 border-black hover:bg-emerald-400 transition-all active:scale-95 shadow-[4px_4px_0px_#000]"
+                      title={isRunning ? "Pausar" : "Iniciar"}
                     >
                       {isRunning ? <Pause /> : <Play />}
                     </button>
                     <button 
-                      onClick={() => { setSimTime(0); setIsRunning(false); playSound('click'); }} 
-                      className="bg-kart-red p-4 border-4 border-black hover:bg-rose-400 transition-colors shadow-lg"
+                      onClick={() => { resetSim(); playSound('click'); }} 
+                      className="bg-kart-red p-3 border-2 border-black hover:bg-rose-400 transition-all active:scale-95 shadow-[4px_4px_0px_#000]"
+                      title="Reiniciar"
                     >
                       <RotateCcw />
                     </button>
                   </div>
-                  <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-sm text-white p-3 border-2 border-white/20 font-tech flex gap-6">
-                    <div>
-                      <p className="text-[8px] uppercase text-slate-400">Tiempo</p>
-                      <p className="text-xl font-bold">{simTime.toFixed(1)}s</p>
-                    </div>
-                    <div className="border-l border-white/20 pl-6">
-                      <p className="text-[8px] uppercase text-slate-400">Distancia</p>
-                      <p className="text-xl font-bold">{(simTime * effV).toFixed(1)}m</p>
-                    </div>
-                  </div>
+
+
                </div>
             </section>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-               <div className={cn(
-                  "md:col-span-1 p-6 space-y-6 bg-white border-4 border-black relative overflow-hidden",
-                  tutorialStep === 1 && showTutorial && "ring-8 ring-kart-yellow z-[60]"
-                )}>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="font-display text-xs uppercase italic text-slate-400">Hangar de Ajustes</p>
-                    {isPracticeMode && <span className="bg-kart-blue text-white text-[8px] px-2 py-0.5 rounded font-black italic">PRÁCTICA</span>}
-                  </div>
-                  
-                  <div className="flex flex-wrap gap-2">
-                    {(['distance', 'velocity', 'time', 'meeting'] as Mode[]).map(m => (
-                      <button 
-                        key={m}
-                        onClick={() => { setMode(m); resetSim(); playSound('click'); }}
-                        className={cn(
-                          "px-2 py-1 rounded font-display text-[9px] uppercase border-2 border-black",
-                          m === mode ? "bg-kart-red text-white" : "bg-white"
-                        )}
-                      >
-                        {m === 'distance' ? 'Distancia' : m === 'velocity' ? 'Velocidad' : m === 'time' ? 'Tiempo' : 'Encuentro'}
-                      </button>
-                    ))}
-                  </div>
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                {/* CONTROLS PANEL */}
+                <div className="lg:col-span-1 p-6 space-y-6 bg-white border-4 border-black shadow-[6px_6px_0px_#000]">
+                   <p className="font-display text-xs uppercase italic text-slate-400 border-b-2 border-slate-100 pb-2">Hangar de Ajustes</p>
+                   
+                   <div className="space-y-4">
+                     {/* Solo mostrar los controles relevantes según el modo del reto */}
+                     {(mode === 'distance' || mode === 'time' || isPracticeMode) && (
+                       <div className="space-y-1">
+                         <div className="flex justify-between items-center text-[10px] font-tech font-bold uppercase text-slate-500">
+                           <span>Velocidad (v)</span>
+                           <span className="text-kart-red font-black leading-none">{velocity} m/s</span>
+                         </div>
+                         <input type="range" min="0" max="200" step="1" value={velocity} onChange={(e) => handleInputChange('v', e.target.value)} className="w-full h-1.5 accent-kart-red" />
+                       </div>
+                     )}
 
-                  <div className="space-y-4">
-                    <div className={cn("space-y-1", mode === 'velocity' && !isPracticeMode && "opacity-50")}>
-                      <div className="flex justify-between items-end">
-                        <label className="text-[9px] font-tech font-black uppercase text-slate-500">Velocidad (v)</label>
-                        <span className="text-lg font-display font-black italic text-kart-red leading-none">{velocity} m/s</span>
-                      </div>
-                      <input 
-                        type="range" min="0" max="200" step="1" value={velocity} 
-                        disabled={mode === 'velocity' && !isPracticeMode}
-                        onChange={(e) => handleInputChange('v', e.target.value)} 
-                        className="w-full accent-kart-red h-1.5"
-                      />
-                    </div>
-
-                    <div className={cn("space-y-1", mode === 'time' && !isPracticeMode && "opacity-50")}>
-                      <div className="flex justify-between items-end">
-                        <label className="text-[9px] font-tech font-black uppercase text-slate-500">Tiempo (t)</label>
-                        <span className="text-lg font-display font-black italic text-kart-blue leading-none">{time} s</span>
-                      </div>
-                      <input 
-                        type="range" min="1" max="60" step="1" value={time} 
-                        disabled={mode === 'time' && !isPracticeMode}
-                        onChange={(e) => handleInputChange('t', e.target.value)} 
-                        className="w-full accent-kart-blue h-1.5"
-                      />
-                    </div>
-
-                    {(mode === 'velocity' || mode === 'time' || isPracticeMode) && (
-                      <div className={cn("space-y-1", mode === 'distance' && !isPracticeMode && "opacity-50")}>
-                        <div className="flex justify-between items-end">
-                          <label className="text-[9px] font-tech font-black uppercase text-slate-500">Distancia (d)</label>
-                          <span className="text-lg font-display font-black italic text-kart-green leading-none">{distance} m</span>
+                     {(mode === 'meeting' || mode === 'overtaking') && (
+                       <>
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center text-[10px] font-tech font-bold uppercase text-slate-500">
+                            <span>Velocidad 1 (v₁)</span>
+                            <span className="text-kart-red font-black leading-none">{velocity} m/s</span>
+                          </div>
+                          <input type="range" min="0" max="200" step="1" value={velocity} onChange={(e) => handleInputChange('v', e.target.value)} className="w-full h-1.5 accent-kart-red" />
                         </div>
-                        <input 
-                          type="range" min="0" max="2000" step="10" value={distance} 
-                          disabled={mode === 'distance' && !isPracticeMode}
-                          onChange={(e) => handleInputChange('d', e.target.value)} 
-                          className="w-full accent-kart-green h-1.5"
-                        />
-                      </div>
-                    )}
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center text-[10px] font-tech font-bold uppercase text-slate-500">
+                            <span>Velocidad 2 (v₂)</span>
+                            <span className="text-kart-blue font-black leading-none">{v2} m/s</span>
+                          </div>
+                          <input type="range" min="0" max="200" step="1" value={v2} onChange={(e) => handleInputChange('v2', e.target.value)} className="w-full h-1.5 accent-kart-blue" />
+                        </div>
+                       </>
+                     )}
 
-                    <div className="bg-kart-yellow p-3 border-4 border-black text-center relative overflow-hidden">
-                      <p className="text-[9px] font-tech uppercase mb-1">Resultado</p>
-                      <p className="text-2xl font-display font-black italic leading-none">{calculatedValue.toFixed(1)}</p>
+                     {(mode === 'velocity' || mode === 'distance' || isPracticeMode) && (
+                       <div className="space-y-1">
+                         <div className="flex justify-between items-center text-[10px] font-tech font-bold uppercase text-slate-500">
+                           <span>Tiempo (t)</span>
+                           <span className="text-kart-blue font-black leading-none">{time} s</span>
+                         </div>
+                         <input type="range" min="1" max="60" step="1" value={time} onChange={(e) => handleInputChange('t', e.target.value)} className="w-full h-1.5 accent-kart-blue" />
+                       </div>
+                     )}
+
+                     {(mode === 'velocity' || mode === 'time' || isPracticeMode) && (
+                       <div className="space-y-1">
+                         <div className="flex justify-between items-center text-[10px] font-tech font-bold uppercase text-slate-500">
+                           <span>Distancia (d)</span>
+                           <span className="text-kart-green font-black leading-none">{distance} m</span>
+                         </div>
+                         <input type="range" min="0" max="2000" step="10" value={distance} onChange={(e) => handleInputChange('d', e.target.value)} className="w-full h-1.5 accent-kart-green" />
+                       </div>
+                     )}
+
+                     {(mode === 'meeting' || mode === 'overtaking') && (
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center text-[10px] font-tech font-bold uppercase text-slate-500">
+                            <span>Distancia Separación (D)</span>
+                            <span className="text-kart-green font-black leading-none">{dTotal} m</span>
+                          </div>
+                          <input type="range" min="0" max="2000" step="10" value={dTotal} onChange={(e) => handleInputChange('dt', e.target.value)} className="w-full h-1.5 accent-kart-green" />
+                        </div>
+                     )}
+
+                     <div className="bg-kart-yellow p-4 border-4 border-black text-center mt-6">
+                       <p className="text-[10px] font-tech uppercase font-bold mb-1">
+                        Resultado: {
+                          mode === 'distance' ? 'Distancia (d)' : 
+                          mode === 'velocity' ? 'Velocidad (v)' : 
+                          mode === 'time' ? 'Tiempo (t)' : 
+                          'Tiempo Encuentro/Alcance'
+                        }
+                       </p>
+                       <p className="text-3xl font-display font-black italic leading-none">
+                         {calculatedValue.toFixed(1)} 
+                         <span className="text-sm ml-2 font-tech uppercase italic">
+                           {mode === 'distance' ? 'm' : mode === 'velocity' ? 'm/s' : 's'}
+                         </span>
+                       </p>
+                     </div>
+                   </div>
+                </div>
+
+               {/* GRAPH AND QUESTION PANEL */}
+               <div className="lg:col-span-3 space-y-8">
+                  {/* BOTONES DE ANÁLISIS */}
+                  <div className="flex flex-wrap gap-4 items-center justify-between">
+                    <div className="flex gap-2 text-[10px]">
+                       <button 
+                        onClick={() => { playSound('click'); setShowSlope(!showSlope); }}
+                        className={cn(
+                          "px-3 py-1.5 border-2 border-black font-display font-black italic uppercase transition-all shadow-[2px_2px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none",
+                          showSlope ? "bg-kart-red text-white" : "bg-white text-black"
+                        )}
+                       >
+                         {showSlope ? 'Ocultar Pendiente' : 'Ver Pendiente (v)'}
+                       </button>
+                       <button 
+                        onClick={() => { playSound('click'); setShowArea(!showArea); }}
+                        className={cn(
+                          "px-3 py-1.5 border-2 border-black font-display font-black italic uppercase transition-all shadow-[2px_2px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none",
+                          showArea ? "bg-kart-green text-white" : "bg-white text-black"
+                        )}
+                       >
+                         {showArea ? 'Ocultar Área' : 'Ver Área (Δx)'}
+                       </button>
                     </div>
                   </div>
-               </div>
-               <div className={cn(
-                  "md:col-span-2 p-6 bg-white border-4 border-black h-[300px]",
-                  tutorialStep === 3 && showTutorial && "z-[60] ring-8 ring-kart-yellow"
-                )}>
-                 <ResponsiveContainer width="100%" height="100%">
-                   <LineChart data={graphData}>
-                     <CartesianGrid /> <XAxis dataKey="time" /> <YAxis /> <Tooltip /> <Line dataKey="distance" stroke="#43b02a" strokeWidth={4} dot={false} />
-                   </LineChart>
-                 </ResponsiveContainer>
+
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    {/* d vs t */}
+                    <div className="p-3 bg-white border-4 border-black shadow-[6px_6px_0px_#000] space-y-2">
+                       <div className="flex justify-between items-center text-[10px] font-display font-black italic uppercase text-slate-400">
+                        <p>Posición vs Tiempo</p>
+                        {showSlope && <span className="text-kart-red">m = v = {effV.toFixed(1)} m/s</span>}
+                      </div>
+                      <div className="h-52 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={graphData}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                            <XAxis dataKey="time" label={{ value: 't (s)', position: 'insideBottomRight', offset: -5, fontSize: 8 }} />
+                            <YAxis domain={[0, 'auto']} label={{ value: 'x (m)', angle: -90, position: 'insideLeft', fontSize: 8 }} />
+                            <Tooltip />
+                            <Line type="monotone" dataKey="distance" stroke="#e60012" strokeWidth={3} dot={false} isAnimationActive={false} />
+                            {(mode === 'meeting' || mode === 'overtaking') && (
+                              <Line type="monotone" dataKey="distance2" stroke="#0072ce" strokeWidth={3} dot={false} isAnimationActive={false} />
+                            )}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* v vs t */}
+                    <div className="p-3 bg-white border-4 border-black shadow-[6px_6px_0px_#000] space-y-2">
+                       <div className="flex justify-between items-center text-[10px] font-display font-black italic uppercase text-slate-400">
+                        <p>Velocidad vs Tiempo</p>
+                        {showArea && <span className="text-kart-green">Área = Δx = {effD.toFixed(0)} m</span>}
+                      </div>
+                      <div className="h-52 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={graphData}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                            <XAxis dataKey="time" label={{ value: 't (s)', position: 'insideBottomRight', offset: -5, fontSize: 8 }} />
+                            <YAxis domain={[0, (dataMax: number) => Math.max(dataMax * 1.2, 50)]} label={{ value: 'v (m/s)', angle: -90, position: 'insideLeft', fontSize: 8 }} />
+                            <Tooltip />
+                            <Area type="stepAfter" dataKey="vel" stroke="#0072ce" strokeWidth={3} fill={showArea ? "#f9d71c" : "transparent"} fillOpacity={0.3} isAnimationActive={false} />
+                            {(mode === 'meeting' || mode === 'overtaking') && (
+                              <Area type="stepAfter" dataKey="vel2" stroke="#43b02a" strokeWidth={2} fill="transparent" isAnimationActive={false} />
+                            )}
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+
+                 {currentNarrative && (
+                   <div className="bg-white border-4 border-black p-8 shadow-[8px_8px_0px_#000] space-y-6">
+                     <div className="flex items-center gap-3">
+                       <div className="w-2 h-8 bg-kart-red"></div>
+                       <h3 className="text-2xl font-display font-black italic uppercase">Cuestionario de Misión</h3>
+                     </div>
+                     
+                      <div className="flex justify-between items-start gap-4">
+                        <p className="text-lg font-bold text-slate-700 bg-slate-100 p-4 border-2 border-black italic flex-1">
+                          {(gameState === 'guided_examples' ? GUIDED_EXAMPLES : CHALLENGES)[currentChallengeIdx].question}
+                        </p>
+                        <button 
+                          onClick={() => setShowHint(!showHint)}
+                          className="bg-white border-4 border-black p-4 hover:bg-slate-50 transition-colors shadow-[4px_4px_0px_#000] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                          title="Obtener Pista"
+                        >
+                          <Info className="text-kart-blue" />
+                        </button>
+                      </div>
+
+                      <AnimatePresence>
+                        {showHint && (
+                          <motion.div 
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="p-4 bg-kart-blue/5 border-2 border-kart-blue border-dashed text-kart-blue flex flex-col items-center gap-2">
+                              <p className="text-[10px] font-tech uppercase font-black">Sugerencia del Sistema</p>
+                              <div className="text-2xl">
+                                <InlineMath math={(gameState === 'guided_examples' ? GUIDED_EXAMPLES : CHALLENGES)[currentChallengeIdx].hint} />
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {(gameState === 'guided_examples' ? GUIDED_EXAMPLES : CHALLENGES)[currentChallengeIdx].options.map(opt => (
+                          <button 
+                            key={opt} 
+                            onClick={() => { handleAnswer(opt); playSound('click'); }} 
+                            className="kart-button border-4 py-4 text-xl flex items-center justify-between px-6 group"
+                          >
+                            <span>{opt}</span>
+                            <ArrowRight className="opacity-0 group-hover:opacity-100 transition-all -translate-x-4 group-hover:translate-x-0" />
+                          </button>
+                        ))}
+                     </div>
+
+                     <AnimatePresence>
+                       {feedback && (
+                         <motion.div 
+                           initial={{ opacity: 0, x: -20 }} 
+                           animate={{ opacity: 1, x: 0 }}
+                           className={cn("p-6 border-4 border-black flex items-center justify-between", feedback.correct ? "bg-kart-green/10 text-kart-green" : "bg-kart-red/10 text-kart-red")}
+                         >
+                           <div className="flex items-center gap-4">
+                             {feedback.correct ? <Trophy size={32} /> : <Skull size={32} />}
+                             <div>
+                               <p className="font-display font-black italic text-xl uppercase leading-none">{feedback.correct ? '¡SISTEMA ESTABLE!' : 'ANOMALÍA DETECTADA'}</p>
+                               <p className="font-tech text-xs uppercase mt-1 opacity-80">{feedback.message}</p>
+                             </div>
+                           </div>
+                           <button 
+                             onClick={() => { nextChallenge(); playSound('click'); }} 
+                             className="bg-black text-white px-8 py-2 font-display italic uppercase text-lg border-2 border-white hover:bg-slate-800 transition-colors"
+                           >
+                             SIGUIENTE REPORTE
+                           </button>
+                         </motion.div>
+                       )}
+                     </AnimatePresence>
+                   </div>
+                 )}
                </div>
             </div>
-
-            <AnimatePresence>
-              {showTutorial && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm">
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    className="max-w-md w-full bg-white border-4 border-black p-8 shadow-[12px_12px_0px_#000] relative"
-                  >
-                    <button onClick={() => setShowTutorial(false)} className="absolute top-4 right-4"><XCircle /></button>
-                    <div className="space-y-6 text-center">
-                      <div className="w-16 h-16 bg-kart-red rounded-full flex items-center justify-center text-white font-display text-2xl border-4 border-black mx-auto">
-                        {tutorialStep + 1}
-                      </div>
-                      <h3 className="text-2xl font-display font-black italic uppercase text-kart-red">Entrenamiento de Piloto</h3>
-                      <div className="p-4 bg-slate-50 border-2 border-black font-tech text-base leading-relaxed italic">
-                        {tutorialStep === 0 && "¡Bienvenido! En MRU Heroes dominarás la física para salvar planetas. El MRU describe objetos que se mueven a velocidad constante."}
-                        {tutorialStep === 1 && "En el panel de ajustes eliges qué calcular: Distancia (d), Velocidad (v) o Tiempo (t). ¡Pruébalo ahora!"}
-                        {tutorialStep === 2 && "En EXPLORACIÓN LIBRE, puedes mover todos los deslizadores para ver cómo cambian los resultados instantáneamente."}
-                        {tutorialStep === 3 && "Observa la gráfica. Muestra la relación entre Posición y Tiempo. ¡Cuanto más inclinada la línea, mayor es la velocidad!"}
-                        {tutorialStep === 4 && "¡Listo! Elige el modo MISIONES para ganar monedas y créditos completando desafíos de física reales."}
-                      </div>
-                      <div className="flex justify-between pt-4 border-t-2 border-slate-100">
-                        <button disabled={tutorialStep === 0} onClick={() => { setTutorialStep(s => s - 1); playSound('click'); }} className="font-tech uppercase text-xs disabled:opacity-20">Atrás</button>
-                        <div className="flex gap-1 items-center">
-                          {[0, 1, 2, 3, 4].map(i => <div key={i} className={cn("w-2 h-2 rounded-full", tutorialStep === i ? "bg-kart-red" : "bg-slate-200")} />)}
-                        </div>
-                        {tutorialStep < 4 ? (
-                          <button onClick={() => { setTutorialStep(s => s + 1); playSound('click'); }} className="bg-kart-blue text-white px-6 py-2 font-display italic text-xs border-2 border-black uppercase">Siguiente</button>
-                        ) : (
-                          <button onClick={() => { setShowTutorial(false); playSound('click'); }} className="bg-kart-green text-white px-6 py-2 font-display italic text-xs border-2 border-black uppercase">¡Empezar!</button>
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-                </div>
-              )}
-            </AnimatePresence>
-
-            {showChallenge && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-                <div className="bg-white border-4 border-black p-8 max-w-xl w-full text-center space-y-6">
-                  <h2 className="text-3xl font-display italic font-black text-kart-red uppercase">Misión #{CHALLENGES[currentChallengeIdx].id}</h2>
-                  <p className="text-xl font-bold">{CHALLENGES[currentChallengeIdx].question}</p>
-                  <div className="grid grid-cols-2 gap-4">
-                    {CHALLENGES[currentChallengeIdx].options.map(opt => <button key={opt} onClick={() => { handleAnswer(opt); playSound('click'); }} className="kart-button border-4 py-4 text-xl">{opt}</button>)}
-                  </div>
-                  {feedback && (
-                    <div className={cn("p-4 font-black italic", feedback.correct ? "text-kart-green" : "text-kart-red")}>
-                      {feedback.message} <button onClick={() => { nextChallenge(); playSound('click'); }} className="bg-black text-white px-6 py-1 ml-4 italic">NEXT</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </motion.div>
         )}
 
         {gameState === 'results' && (
-          <motion.div key="results" className="max-w-2xl mx-auto mt-20 p-12 bg-white border-4 border-black text-center space-y-8 shadow-[10px_10px_0px_#000]">
-             <h2 className="text-4xl font-display font-black italic uppercase text-kart-blue">CARRERA FINALIZADA</h2>
-             <div className="flex justify-center gap-10">
-               <div className="p-6 bg-kart-yellow border-4 border-black"><p className="text-4xl font-black italic">{coins}</p><p className="text-xs uppercase font-tech">Coins</p></div>
+          <motion.div key="results" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="max-w-2xl mx-auto mt-20 p-12 bg-white border-4 border-black text-center space-y-8 shadow-[12px_12px_0px_#000]">
+             <Trophy size={80} className="mx-auto text-kart-yellow drop-shadow-lg" />
+             <h2 className="text-5xl font-display font-black italic uppercase text-kart-blue">Operación Finalizada</h2>
+             
+             <div className="grid grid-cols-2 gap-6">
+                <div className="p-6 bg-kart-yellow border-4 border-black">
+                  <p className="text-4xl font-display font-black italic">{coins}</p>
+                  <p className="text-[10px] uppercase font-tech font-bold">Coins Galácticos</p>
+                </div>
+                <div className="p-6 bg-kart-green text-white border-4 border-black">
+                  <p className="text-4xl font-display font-black italic">{xp}</p>
+                  <p className="text-[10px] uppercase font-tech font-bold">Puntos de Héroe</p>
+                </div>
              </div>
-             <button onClick={() => window.location.reload()} className="kart-button bg-kart-red text-white py-4 px-10 text-xl font-black italic">REINTENTAR</button>
+
+             <div className="p-8 border-4 border-black space-y-2">
+               <p className="font-tech text-xs text-slate-400 uppercase">Clasificación de Piloto</p>
+               <p className={cn("text-3xl font-display font-black italic uppercase", performanceRating.color)}>{performanceRating.label}</p>
+             </div>
+
+             <button 
+              onClick={() => window.location.reload()} 
+              className="kart-button w-full bg-kart-red text-white py-4 text-2xl font-black italic font-display uppercase shadow-[8px_8px_0px_#000] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all"
+             >
+               Nueva Misión
+             </button>
           </motion.div>
         )}
 
@@ -873,6 +1617,33 @@ export default function App() {
                     <p className="text-[10px] font-tech uppercase mt-1">Estudiantes</p>
                   </div>
                 ))}
+              </div>
+
+              {/* GUEST SUMMARY */}
+              <div className="bg-slate-50 border-4 border-black p-4 flex flex-col sm:flex-row items-center justify-between gap-6">
+                 <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white border-2 border-black flex items-center justify-center text-slate-400">
+                      <User size={24} />
+                    </div>
+                    <div>
+                      <p className="font-display font-black italic text-xl uppercase leading-none">Resumen de Visitantes</p>
+                      <p className="font-tech text-[10px] text-slate-400 uppercase">Actividad de usuarios sin registro</p>
+                    </div>
+                 </div>
+                 <div className="flex gap-8">
+                    <div className="text-center">
+                       <p className="text-[10px] font-tech uppercase text-slate-400">Total Visitantes</p>
+                       <p className="text-2xl font-display font-black italic">{guestStats?.count || 0}</p>
+                    </div>
+                    <div className="text-center border-l-2 border-slate-200 pl-8">
+                       <p className="text-[10px] font-tech uppercase text-slate-400">Rendimiento Promedio</p>
+                       <p className="text-2xl font-display font-black italic text-kart-blue">
+                         {guestStats?.totalResponses > 0 
+                            ? Math.round((guestStats.totalCorrect / guestStats.totalResponses) * 100) 
+                            : 0}%
+                       </p>
+                    </div>
+                 </div>
               </div>
 
               {/* FILTERS TOOLBAR */}
@@ -1030,13 +1801,25 @@ export default function App() {
                             <p className="text-[10px] font-tech text-slate-400 flex items-center gap-2 uppercase">
                               <Clock size={12} /> Última actividad: {session.lastActiveAt?.toDate().toLocaleString() || 'N/A'}
                             </p>
-                            <button 
-                              onClick={() => handleDeleteSession(session.id, session.userName)}
-                              className="p-2 text-slate-300 hover:text-kart-red transition-colors"
-                              title="Eliminar Registro"
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={() => handleDeleteSession(session.id, session.userName)}
+                                className="p-2 text-slate-300 hover:text-kart-red transition-colors"
+                                title="Eliminar este Registro"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                              {session.userId && (
+                                <button 
+                                  onClick={() => deleteUser(session.userId, session.userName)}
+                                  className="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white transition-all border-2 border-red-100 hover:border-red-600 rounded-md ml-2"
+                                  title="BORRAR ESTUDIANTE COMPLETO (PERFIL + TODO EL PROGRESO)"
+                                >
+                                  <UserX size={14} />
+                                  <span className="font-tech text-[9px] font-bold uppercase whitespace-nowrap">Eliminar Estudiante</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
 
@@ -1104,27 +1887,12 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+    </main>
 
-      <footer className="max-w-6xl mx-auto mt-20 mb-10 text-center space-y-4">
+      <footer className="max-w-6xl mx-auto mb-10 text-center space-y-4 relative z-20">
         <div className="flex flex-col items-center gap-3">
           <button 
-            onClick={async () => {
-              try {
-                if (currentUser?.email === 'iejosefacampos2025@gmail.com') {
-                  setGameState('admin');
-                } else {
-                  const user = await signInWithGoogle();
-                  if (user?.email === 'iejosefacampos2025@gmail.com') {
-                    setGameState('admin');
-                  } else if (user) {
-                    alert("Acceso Restringido: Solo el docente administrador puede ingresar al panel de monitoreo.");
-                  }
-                }
-              } catch (err) {
-                console.error(err);
-                alert("Para acceder a la administración, abre la app en una nueva pestaña.");
-              }
-            }}
+            onClick={() => { playSound('click'); setShowCredits(true); }}
             className="font-display font-black italic text-xl text-kart-red uppercase tracking-tighter hover:opacity-70 transition-opacity"
           >
             Créditos del Proyecto
@@ -1136,11 +1904,84 @@ export default function App() {
               <span className="w-1 h-1 bg-slate-300 rounded-full" />
               <span>Docente I.E Josefa Campos</span>
             </p>
-            <p className="opacity-50">Lic. matemáticas y física (UdeA) | Mag. Enseñanza (UNAL) | Doctorante en Educación (UTEL)</p>
-            <p className="mt-2 text-slate-400 font-black italic">@Laboratorio virtual Josefa Campos</p>
+            <p className="opacity-50 text-[8px]">Lic. matemáticas y física (UdeA) | Mag. Enseñanza (UNAL) | Doctorante en Educación (UTEL)</p>
           </div>
+          
+          <button 
+            onClick={async () => {
+              try {
+                if (currentUser?.email === 'iejosefacampos2025@gmail.com') {
+                  setGameState('admin');
+                } else {
+                  const user = await signInWithGoogle();
+                  if (user?.email === 'iejosefacampos2025@gmail.com') {
+                    setGameState('admin');
+                  } else if (user) {
+                    alert("Acceso Restringido: Reservado para el docente.");
+                  }
+                }
+              } catch (err) {
+                alert("Error de acceso.");
+              }
+            }}
+            className="text-[8px] font-tech text-slate-300 uppercase hover:text-slate-500"
+          >
+            Terminal Admin
+          </button>
         </div>
       </footer>
+
+      <AnimatePresence>
+        {showCredits && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="max-w-2xl w-full bg-white border-8 border-black p-10 shadow-[15px_15px_0px_#000] relative space-y-8"
+            >
+              <button 
+                onClick={() => setShowCredits(false)}
+                className="absolute -top-6 -right-6 bg-kart-red text-white p-3 border-4 border-black hover:rotate-90 transition-transform"
+              >
+                <XCircle size={32} />
+              </button>
+              
+              <div className="text-center space-y-4">
+                <h2 className="text-5xl font-display font-black italic uppercase text-kart-blue drop-shadow-md">Créditos</h2>
+                <div className="h-2 w-32 bg-kart-yellow mx-auto border-2 border-black" />
+              </div>
+
+              <div className="space-y-6 font-tech text-sm leading-loose text-center">
+                <div className="p-6 bg-slate-50 border-4 border-black space-y-2">
+                  <p className="font-black text-xl italic uppercase text-kart-red leading-none">Jorge Armando Jaramillo Bravo</p>
+                  <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Líder de Proyecto & Autor de Contenidos</p>
+                  <p className="text-slate-400 border-t-2 border-slate-200 pt-2 italic">
+                    Docente de la Institución Educativa Josefa Campos (Bello, Antioquia). Experto en enseñanza de la física.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-6 uppercase text-[10px] font-black text-slate-500">
+                  <div className="space-y-1">
+                    <p className="text-kart-blue">Desarrollo Tecnológico</p>
+                    <p className="text-black">Google AI Studio Build</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-kart-green">Pedagogía</p>
+                    <p className="text-black">Gamificación en Ciencias</p>
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-center opacity-50 uppercase tracking-[0.2em] pt-4">
+                  © 2026 Laboratorio Virtual Josefa Campos.
+                </p>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
+export default App;
