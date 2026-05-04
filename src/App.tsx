@@ -229,30 +229,30 @@ const CHARACTERS: Character[] = [
   { 
     id: 'vector', 
     name: 'VECTOR', 
-    image: '/vector2.png', 
+    image: 'https://i.postimg.cc/cHsJqfy5/Vector2.png', 
     color: 'text-kart-red',
-    description: 'Directo y enfocado. La distancia más corta es su meta.'
+    description: 'La distancia más corta entre dos puntos es mi trayectoria'
   },
   { 
     id: 'inercia', 
     name: 'INERCIA', 
-    image: '/inercia2.png', 
+    image: 'https://i.postimg.cc/zBJfmTZ7/inercia2.png', 
     color: 'text-kart-green',
-    description: 'Relajado pero persistente. Nadie la detiene.'
+    description: 'Una vez que arranca, nadie la detiene. Es relajada pero persistente.'
   },
   { 
     id: 'cronos', 
     name: 'CRONOS', 
-    image: '/cronos2.png', 
+    image: 'https://i.postimg.cc/Dz3ZgtCm/cronos2.png', 
     color: 'text-kart-blue',
-    description: 'Obsesionado con la exactitud de cada milisegundo.'
+    description: 'Obsesionado con la exactitud. Calcula cada milisegundo de la carrera.'
   },
   { 
     id: 'magno', 
     name: 'MAGNO', 
-    image: '/magno2.png', 
+    image: 'https://i.postimg.cc/50xtc8dR/magno2.png', 
     color: 'text-kart-yellow',
-    description: 'Rudo y constante. Mantiene su ritmo pase lo que pase.'
+    description: 'Rudo pero bonachón. Su fuerza le permite mantener una velocidad constante sin desviarse por obstáculos menores.'
   }
 ];
 
@@ -707,8 +707,6 @@ const App = () => {
     resetSim();
   };
 
-  const [showCredits, setShowCredits] = useState(false);
-
   const handleDeleteSession = async (id: string, name: string) => {
     if (!window.confirm(`¿Estás seguro de que deseas eliminar el registro de "${name}"? Esta acción no se puede deshacer.`)) return;
     try {
@@ -725,6 +723,7 @@ const App = () => {
     }
   };
 
+  const [showCredits, setShowCredits] = useState(false);
   const [mode, setMode] = useState<Mode>('distance');
   const [velocity, setVelocity] = useState<number>(30);
   const [time, setTime] = useState<number>(10);
@@ -965,13 +964,6 @@ const App = () => {
                 <User /> VER COMO VISITANTE
               </button>
             </div>
-
-            <button 
-              onClick={() => setShowCredits(true)}
-              className="font-tech text-xs text-slate-400 hover:text-black transition-colors uppercase tracking-widest"
-            >
-              Créditos & Información
-            </button>
           </motion.div>
         )}
 
@@ -1216,70 +1208,86 @@ const App = () => {
                     </div>
                   </div>
 
-                  {/* MAIN TRACK LAYER (Moving world) */}
-                  <div className="absolute inset-0">
+                   <div className="absolute inset-0">
+                    {/* BACKGROUNDS LAYER */}
                     <motion.div 
                       className="absolute inset-y-0 h-full"
                       animate={{ x: -(simTime * effV * 10) }}
                       transition={{ ease: "linear", duration: 0 }}
-                      style={{ left: '40px' }}
+                      style={{ left: '40px', zIndex: 10 }}
                     >
-                      {/* Segment 1: START */}
-                      <div className="absolute inset-y-0 left-0 h-full w-[1600px] z-10">
+                      {/* Background Segment 1: START */}
+                      <div className="absolute inset-y-0 left-0 h-full w-[1600px]">
                         <img src="/background1.png" className="w-full h-full object-fill pointer-events-none" />
-                        <div className="absolute inset-0 z-30 pointer-events-none">
-                          <img src="/foreground1.png" className="absolute inset-0 w-full h-full object-fill" />
-                          <div className="absolute top-[18.2%] left-[72%] w-[19.5%] h-[9%] flex items-center justify-center -rotate-1">
-                             <div className="bg-black w-full h-[60%] flex items-center justify-center border border-kart-red/30">
-                                <p className="text-kart-red font-tech text-[14px]">LEVEL 1: MRU</p>
-                             </div>
-                          </div>
-                          <div className="absolute top-[40%] right-[3%] bg-black/80 border border-white/20 p-2 text-white font-tech text-[8px] uppercase">
-                            DATOS DE CARRERA
-                          </div>
-                        </div>
                       </div>
 
-                      {/* Filler background 2 loop */}
+                      {/* Background Filler 2 loop */}
                       {(() => {
                         const targetPos = effD * 10;
                         const fillerNeeded = Math.ceil(targetPos / 1600) + 1;
                         return Array.from({ length: fillerNeeded }).map((_, i) => (
-                          <div key={`fill-${i}`} className="absolute inset-y-0 h-full w-[1604px]" style={{ left: `${(i+1)*1600}px`, zIndex: 0 }}>
+                          <div key={`bg-fill-${i}`} className="absolute inset-y-0 h-full w-[1604px]" style={{ left: `${(i+1)*1600}px` }}>
                             <img src="/background2.png" className="w-full h-full object-fill pointer-events-none" />
                           </div>
                         ));
                       })()}
 
-                      {/* Segment Finish: Background 3 */}
-                      <div className="absolute inset-y-0 w-[1600px] h-full" style={{ left: `${effD * 10}px`, zIndex: 35 }}>
+                      {/* Background Segment Finish: 3 */}
+                      <div className="absolute inset-y-0 w-[1600px] h-full" style={{ left: `${effD * 10}px` }}>
                         <img src="/background3.png" className="w-full h-full object-fill pointer-events-none" />
-                        <div className="absolute inset-0 z-45 pointer-events-none">
-                          <img src="/foreground3.png" className="absolute inset-0 w-full h-full object-fill" />
+                      </div>
+                    </motion.div>
+
+                    {/* MOBILES LAYER (In middle) */}
+                    <div className="absolute inset-0 z-40 pointer-events-none">
+                      <img src={selectedChar?.image || 'https://i.postimg.cc/cHsJqfy5/Vector2.png'} className="absolute bottom-6 left-10 w-28 drop-shadow-lg pointer-events-auto" />
+                      
+                      {(mode === 'meeting' || mode === 'overtaking') && (
+                        <motion.img 
+                          src="https://i.postimg.cc/50xtc8dR/magno2.png" 
+                          className="absolute bottom-6 w-40 grayscale opacity-80 pointer-events-auto"
+                          animate={{ 
+                            left: isChase 
+                              ? `${10 + (80 * (dTotal + (v2 - effV) * simTime) / (dTotal || 1))}%`
+                              : `${10 + (80 * (dTotal - (effV + v2) * simTime) / (dTotal || 1))}%`
+                          }}
+                        />
+                      )}
+                    </div>
+
+                    {/* FOREGROUNDS LAYER (On top) */}
+                    <motion.div 
+                      className="absolute inset-y-0 h-full"
+                      animate={{ x: -(simTime * effV * 10) }}
+                      transition={{ ease: "linear", duration: 0 }}
+                      style={{ left: '40px', zIndex: 50 }}
+                    >
+                      {/* Foreground Segment 1: START */}
+                      <div className="absolute inset-y-0 left-0 h-full w-[1600px] pointer-events-none">
+                        <img src="/foreground1.png" className="w-full h-full object-fill" />
+                        <div className="absolute top-[18.2%] left-[72%] w-[19.5%] h-[9%] flex items-center justify-center -rotate-1">
+                            <div className="bg-black w-full h-[60%] flex items-center justify-center border border-kart-red/30">
+                              <p className="text-kart-red font-tech text-[14px]">LEVEL 1: MRU</p>
+                            </div>
+                        </div>
+                        <div className="absolute top-[40%] right-[3%] bg-black/80 border border-white/20 p-2 text-white font-tech text-[8px] uppercase">
+                          DATOS DE CARRERA
+                        </div>
+                      </div>
+
+                      {/* Foreground Segment Finish: 3 */}
+                      <div className="absolute inset-y-0 w-[1600px] h-full pointer-events-none" style={{ left: `${effD * 10}px` }}>
+                        <img src="/foreground3.png" className="w-full h-full object-fill" />
+                        <div className="absolute inset-0 flex items-center justify-center">
                           <div className="absolute top-[18.2%] left-[72%] w-[19.5%] h-[9%] flex items-center justify-center -rotate-1">
-                             <div className="bg-black w-full h-[60%] flex items-center justify-center border border-green-500/30">
-                                <p className="text-green-500 font-tech text-[11px] text-center leading-none">¡LLEGADA! FIN DEL NIVEL 1: MRU</p>
-                             </div>
+                            <div className="bg-black w-full h-[60%] flex items-center justify-center border border-green-500/30">
+                              <p className="text-green-500 font-tech text-[11px] text-center leading-none">¡LLEGADA! FIN DEL NIVEL 1: MRU</p>
+                            </div>
                           </div>
                         </div>
                       </div>
                     </motion.div>
                   </div>
-
-                  {/* MOBILES */}
-                  <img src={selectedChar?.image || '/vector2.png'} className="absolute bottom-6 left-10 w-28 z-40 drop-shadow-lg" />
-                  
-                  {(mode === 'meeting' || mode === 'overtaking') && (
-                    <motion.img 
-                      src="/magno2.png" 
-                      className="absolute bottom-6 w-40 z-40 grayscale opacity-80"
-                      animate={{ 
-                        left: isChase 
-                          ? `${10 + (80 * (dTotal + (v2 - effV) * simTime) / (dTotal || 1))}%`
-                          : `${10 + (80 * (dTotal - (effV + v2) * simTime) / (dTotal || 1))}%`
-                      }}
-                    />
-                  )}
 
                   {/* FOREGROUND LAYER */}
                   <motion.div 
