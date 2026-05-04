@@ -1981,7 +1981,7 @@ const App = () => {
                 </div>
 
                 <p className="text-[10px] text-center opacity-50 uppercase tracking-[0.2em] pt-4">
-                  © 2026 Laboratorio Virtual Josefa Campos.
+                  © 2026 LABORATORIO INTERACTIVO JOSEFA CAMPOS
                 </p>
               </div>
             </motion.div>
